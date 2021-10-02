@@ -53,17 +53,17 @@ export default function List({state, onChange, onShare}) {
     let list = document.getElementById("list")
     let i = 1
     while (i<Object.keys(state).length) {
-    let label = document.createElement("label")
-    let span = document.createElement("span")
-    let txt = document.createElement("textarea")
-    span.classList.add("list-id")
-    span.value=i
-    txt.value = state[i]===undefined?'':state[i] //num/id
-    txt.classList.add("list-field")
-    label.append(span)
-    label.append(txt)
-    list.append(label)
-    i+=1;
+      let label = document.createElement("label")
+      let span = document.createElement("span")
+      let txt = document.createElement("textarea")
+      span.classList.add("list-id")
+      span.value=i
+      txt.value = state[i]===undefined?'':state[i] //num/id
+      txt.classList.add("list-field")
+      label.append(span)
+      label.append(txt)
+      list.append(label)
+      i+=1;
     }
   }
 
@@ -73,7 +73,7 @@ export default function List({state, onChange, onShare}) {
       temp[0] = "editor"
       onChange({...temp})
     } else {
-      renderAreas('one');
+      renderAreas('one'); //what is one
 //what else
     }
   }
@@ -97,9 +97,13 @@ export default function List({state, onChange, onShare}) {
       }
       onChange({...temp})
     } else {
-      //share
+      //share + COPY TO CLIPBOARD
       onShare();
     }
+  }
+
+  function voice() {
+    
   }
 
   return (
@@ -107,10 +111,14 @@ export default function List({state, onChange, onShare}) {
       <h2 id="head" className="list-header">
         Shopping list editor
       </h2>
+      <div>
+        <button onClick={voice}><h1>Create list by voice</h1></button><p></p>
+      </div>
       <div className="list" id="list">
         <label>
           <span className="list-id">1. </span>
           <textarea className="list-field"></textarea>
+          
         </label>
         <label>
           <span className="list-id">2. </span>

@@ -16,7 +16,8 @@ function App() {
     const [url,setUrl] = useState("")
 
     useEffect(async()=>{
-        let params = window.location.pathname.substring(1);
+        //let params = window.location.pathname.substring(22); git
+        let params = window.location.search.substring(1);
         if (params!==url) {
             setUrl(params);
             let docRef = doc(db, "lists", params);
@@ -24,7 +25,7 @@ function App() {
             
             if (docSnap.exists()) {
               //console.log("Document data:", data);
-              handleChange({...docSnap.data()},params);
+              handleChange({...docSnap.data()});
             } else {
               // doc.data() will be undefined in this case
               console.log("No such document!");
@@ -32,11 +33,7 @@ function App() {
         }
     })
 
-    function handleChange(newState,url="unset") {
-        if (url!=="unset") {
-            setUrl(url);
-            console.log('new url ',url);
-        }
+    function handleChange(newState) {
         setState(newState);
         console.log('main state ',state);
     }
@@ -44,6 +41,7 @@ function App() {
     async function sharing() {
         const docRef = await addDoc(collection(db, "lists"), state);
         console.log("Document written with ID: ", docRef.id);
+        window.location.search = "?"+docRef.id;
     }
 
     return (
