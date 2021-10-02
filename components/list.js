@@ -1,25 +1,16 @@
-import React, { useEffect, useState, useRef } from "react"
+import React, { useEffect } from "react"
 import "./list.scss"
 
-export default function List() {
-  const [state, setState] = useState({
-    0: "editor", //editor or viewer
-    1: "valu1",
-    2: "cucumber",
-    3: "pig"
-  })
+export default function List({state, onChange, onShare}) {
 
   useEffect(() => {
     if (state[0] === "editor") {
       //set up editor
       document.getElementById("head").innerHTML = "Shopping list editor"
       document.getElementById("button1").innerHTML = "Add more"
-      document.getElementById("button2").innerHTML = "done"
+      document.getElementById("button2").innerHTML = "Done"
+      document.getElementById('list').innerHTML=''
       renderAreas()
-      /*let areas = document.getElementsByClassName("list-field")
-      for (let area of areas) {
-        area.disabled = false
-      }*/
     } else {
       //set up viewer
       document.getElementById("head").innerHTML = "Your shopping list"
@@ -44,27 +35,53 @@ export default function List() {
     }
   }
 
-  function renderAreas() {
+  function renderAreas(prop) {
+    if (prop=='one'){
+      let list = document.getElementById("list")
+      let label = document.createElement("label")
+      let span = document.createElement("span")
+      let txt = document.createElement("textarea")
+      span.classList.add("list-id")
+      txt.classList.add("list-field")
+      span.value=''
+      txt.value = ''
+      label.append(span)
+      label.append(txt)
+      list.append(label)
+      return 0;
+    }
     let list = document.getElementById("list")
+    let i = 1
+    while (i<Object.keys(state).length) {
     let label = document.createElement("label")
     let span = document.createElement("span")
     let txt = document.createElement("textarea")
-    let i = 1
     span.classList.add("list-id")
-    span.innerHTML=i
-    txt.innerHTML = state[i]===undefined?'':state[i] //num/id
-    i+=1;
+    span.value=i
+    txt.value = state[i]===undefined?'':state[i] //num/id
     txt.classList.add("list-field")
     label.append(span)
     label.append(txt)
     list.append(label)
+    i+=1;
+    }
   }
 
   function button1() {
-    console.log(state[0])
     if (state[0] === "viewer") {
       let temp = state
       temp[0] = "editor"
+      onChange({...temp})
+    } else {
+      renderAreas('one');
+//what else
+    }
+  }
+
+  function button2() {
+    if (state[0] === "editor") {
+      let temp = state
+      temp[0] = "viewer"
       let areas = document.getElementsByClassName("list-field")
       let i = 1
       for (let area of areas) {
@@ -78,22 +95,10 @@ export default function List() {
       for (i;i<size;i++) {
         delete temp[i] //clean after
       }
-      console.log(temp)
-      setState({...temp})
-    } else {
-      renderAreas();
-//what else
-    }
-  }
-
-  function button2() {
-    console.log(state[0])
-    if (state[0] === "editor") {
-      let temp = state
-      temp[0] = "viewer"
-      setState({...temp})
+      onChange({...temp})
     } else {
       //share
+      onShare();
     }
   }
 
