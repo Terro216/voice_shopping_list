@@ -25,6 +25,26 @@ export default function List({state, onChange, onShare}) {
     }
   })
 
+  const editorElem = (i) => {
+      let label = document.createElement("label")
+      let cross = document.createElement("div")
+      let span = document.createElement("span")
+      let txt = document.createElement("textarea")
+      cross.innerHTML="XXX DELETE XXX"
+      cross.classList.add('list-cross');
+      cross.onclick = (e) => {
+        deleteElem(e);
+      }
+      span.classList.add("list-id")
+      span.innerHTML=i
+      txt.value = state[i]===undefined?'':state[i] //num/id
+      txt.classList.add("list-field")
+      label.append(cross)
+      label.append(span)
+      label.append(txt)
+      return label
+  }
+
   function renderItems() {
     let list = document.getElementById('list');
     let size = Object.keys(state).length; 
@@ -36,8 +56,9 @@ export default function List({state, onChange, onShare}) {
   }
 
   function renderAreas(prop) {
-    if (prop=='one'){
+    if (prop=='one'){ //one = add one element
       let list = document.getElementById("list")
+      /*
       let label = document.createElement("label")
       let span = document.createElement("span")
       let txt = document.createElement("textarea")
@@ -46,25 +67,43 @@ export default function List({state, onChange, onShare}) {
       span.value=''
       txt.value = ''
       label.append(span)
-      label.append(txt)
-      list.append(label)
+      label.append(txt)*/
+
+      let label = editorElem(Object.keys(state).length);
+      list.append(label) 
+      state[O]
       return 0;
     }
     let list = document.getElementById("list")
     let i = 1
     while (i<Object.keys(state).length) {
-      let label = document.createElement("label")
-      let span = document.createElement("span")
-      let txt = document.createElement("textarea")
-      span.classList.add("list-id")
-      span.value=i
-      txt.value = state[i]===undefined?'':state[i] //num/id
-      txt.classList.add("list-field")
-      label.append(span)
-      label.append(txt)
+      let label = editorElem(i);
       list.append(label)
       i+=1;
     }
+  }
+
+  function deleteElem(e) {
+    let elem = e.srcElement.parentNode;
+    let i;
+    for (i=0;i<document.getElementById("list").childNodes.length;i++) {
+      //console.log(document.getElementById("list").childNodes[i],elem)
+      if (document.getElementById("list").childNodes[i]==elem) {
+        break
+      }
+    }
+    i+=1; //+ editor setting
+    //console.log('del',elem)
+    //elem.parentNode.removeChild(elem);
+    let temp = {};
+    let x = 0;
+    for (let [key,val] of Object.entries(state)) {
+      if (key!=i) { //all excepting item to delete
+        temp[x]=val;
+        x+=1;
+      }
+    }
+    onChange({...temp})
   }
 
   function button1() {
@@ -93,7 +132,7 @@ export default function List({state, onChange, onShare}) {
       }
       let size = Object.keys(temp).length; 
       for (i;i<size;i++) {
-        delete temp[i] //clean after
+        delete temp[i] //clean empty after
       }
       onChange({...temp})
     } else {
@@ -103,7 +142,44 @@ export default function List({state, onChange, onShare}) {
   }
 
   function voice() {
+    let recognition;
+  try {
+    recognition = new webkitSpeechRecognition();
+  } catch (e) {
+    recognition = new SpeechRecognition();
+  }
+    //const SpeechGrammarList = window.SpeechGrammarList || window.webkitSpeechGrammarList;
+    //const SpeechRecognitionEvent = window.SpeechRecognitionEvent || window.webkitSpeechRecognitionEvent;
+    recognition.lang="ru-RU";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
     
+    recognition.start();
+    console.log('Ready to receive a command.');
+
+    recognition.onaudiostart = function() {
+      //hidden show something
+    }; 
+
+    recognition.onspeechend = function() {
+      recognition.stop();
+     // microphoneWrapper.style.visibility = 'visible'; hidden show again
+     // audioRecordAnimation.style.visibility = 'hidden';
+    };
+
+    recognition.onnomatch = function(event) {
+      alert("Error. Please, try again");
+    };
+
+    recognition.onresult = function(event) {
+      const last = event.results.length - 1;
+      let res = event.results[last][0].transcript.split(' ');
+      console.log('res: ',res)
+      //точность console.log('Confidence: ' + event.results[0][0].confidence);
+    };
+    
+
   }
 
   return (
@@ -111,8 +187,8 @@ export default function List({state, onChange, onShare}) {
       <h2 id="head" className="list-header">
         Shopping list editor
       </h2>
-      <div>
-        <button onClick={voice}><h1>Create list by voice</h1></button><p></p>
+      <div className="voice-button-wrapper">
+        <button onClick={voice}><h1>Add elements by voice</h1></button><p></p>
       </div>
       <div className="list" id="list">
         <label>
