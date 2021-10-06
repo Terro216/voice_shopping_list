@@ -8,16 +8,16 @@ import "./app.scss"
 function App() {
   const [state, setState] = useState({
     0: "editor", //editor or viewer...maybe SPLIT to ANOTHER STATE
-    1: "Молоко",
-    2: "Хлеб",
-    3: "Яйца",
-    4: "Конфеты",
+    1: "яблоко",
+    2: "бананы",
+    3: "лимон",
+    4: "молоко",
   })
   const [count, setCount] = useState({
     1: 1,
-    2: 2,
-    3: 2,
-    4: 20, //finish here
+    2: 8,
+    3: 1,
+    4: 2, //finish here
   })
   const [url, setUrl] = useState("")
 
@@ -39,8 +39,9 @@ function App() {
     }
   })
 
-  function handleChange(newState, newCounter = { 0: -1 }) {
-    if (newCounter[0] !== -1) {
+  function handleChange(newState, newCounter = {}) {
+    if (newCounter && Object.keys(newCounter).length !== 0) {
+      //if not default
       setCount(newCounter)
     }
     setState(newState)

@@ -2,7 +2,9 @@ import React, { useEffect } from "react"
 import "./list.scss"
 
 export default function List({ state, count, onChange, onShare }) {
+  let localElementCounter
   useEffect(() => {
+    localElementCounter = Object.keys(count).length
     if (state[0] === "editor") {
       //set up editor
       document.getElementById("head").innerHTML = "Редактор листа покупок"
@@ -26,7 +28,7 @@ export default function List({ state, count, onChange, onShare }) {
     }
   })
 
-  const editorElem = (i) => {
+  function editorElem(i, val = "") {
     let label = document.createElement("label")
     let cross = document.createElement("div")
     let span = document.createElement("span")
@@ -35,7 +37,7 @@ export default function List({ state, count, onChange, onShare }) {
     counter.innerHTML = `
       <textarea class="list-count">${
         count[i] === undefined || !Number.isInteger(+count[i]) ? 1 : +count[i]
-      } </textarea>
+      }</textarea>
       `
     cross.innerHTML = "XXX DELETE XXX"
     cross.classList.add("list-cross")
@@ -43,8 +45,9 @@ export default function List({ state, count, onChange, onShare }) {
       deleteElem(e)
     }
     span.classList.add("list-id")
-    span.innerHTML = i
-    txt.value = state[i] === undefined ? "" : state[i] //num/id
+    span.innerHTML = i == undefined ? localElementCounter : i
+    localElementCounter += 1
+    txt.value = state[i] === undefined ? val : state[i] //num/id
     txt.classList.add("list-field")
     label.append(cross)
     label.append(span)
@@ -68,13 +71,13 @@ export default function List({ state, count, onChange, onShare }) {
       //one = add one area
       let list = document.getElementById("list")
 
-      let label = editorElem(Object.keys(state).length)
+      let label = editorElem(localElementCounter)
       list.append(label)
-      //state[0] delete
       return 0
     }
     let list = document.getElementById("list")
     let i = 1
+    localElementCounter = 1 //Object.keys(count)[Object.keys(count).length - 1]
     while (i < Object.keys(state).length) {
       let label = editorElem(i)
       list.append(label)
@@ -86,15 +89,19 @@ export default function List({ state, count, onChange, onShare }) {
     //wrong working - delete all elems
 
     let elem = e.path[1]
-    let i
-    for (i = 0; i < document.getElementById("list").childNodes.length; i++) {
+    for (
+      let i = 0;
+      i < document.getElementById("list").childNodes.length;
+      i++
+    ) {
       if (document.getElementById("list").childNodes[i] == elem) {
         document.getElementById("list").childNodes[i].remove()
+        i += 1 //+ editor setting
+        // console.log(i)
         break
       }
     }
-    /* deleting by removing from state.. unnecessary 
-    i += 1 //+ editor setting
+    /*deleting by removing from state.. unnecessary or not
 
     let temp = {}
     let tempC = {}
@@ -102,30 +109,36 @@ export default function List({ state, count, onChange, onShare }) {
     for (let [key, val] of Object.entries(state)) {
       if (key != i) {
         //all excepting item to delete
+        console.log(temp, tempC)
         temp[x] = val
-        tempC[x + 1] = count[x + 1]
+        if (count[x] != undefined) {
+          tempC[x] = count[x]
+        }
         x += 1
+        console.log(temp, tempC)
         //tempC[x] = count[x] why dont upgrade state...
       }
     }
+    console.log("temp", temp, tempC)
     onChange({ ...temp }, { ...tempC })
     */
   }
 
   function button1() {
     if (state[0] === "viewer") {
+      //редактировать
       let temp = state
       temp[0] = "editor"
       onChange({ ...temp })
     } else {
+      //добавить продукты
       renderAreas("one")
-      //what else
     }
   }
 
   function button2() {
     if (state[0] === "editor") {
-      //switch to viewer
+      //готово
       let temp = state
       let tempC = count
       temp[0] = "viewer"
@@ -149,6 +162,8 @@ export default function List({ state, count, onChange, onShare }) {
         tempC[i] = +val
         i += 1
       }
+
+      //что за clean empty after...
       let size = Object.keys(temp).length
       let iC = i
       for (i; i < size; i++) {
@@ -156,12 +171,12 @@ export default function List({ state, count, onChange, onShare }) {
       }
 
       let sizeC = Object.keys(tempC).length
-      for (iC; iC < sizeC; i++) {
+      for (iC; iC < sizeC; iC++) {
         delete tempC[iC] //clean empty after
       }
       onChange({ ...temp }, { ...tempC })
     } else {
-      //share + COPY TO CLIPBOARD
+      //поделиться + show modal with link and func of COPY TO CLIPBOARD
       onShare()
     }
   }
@@ -184,8 +199,6 @@ export default function List({ state, count, onChange, onShare }) {
 
     recognition.onaudiostart = function () {
       //hidden show something
-      button2()
-      button1() //mini done to save the
     }
 
     recognition.onspeechend = function () {
@@ -195,29 +208,34 @@ export default function List({ state, count, onChange, onShare }) {
     }
 
     recognition.onnomatch = function (event) {
-      alert("Error. Please, try again")
+      //alert("Error. Please, try again")
     }
 
     recognition.onresult = function (event) {
       const last = event.results.length - 1
       let res = event.results[last][0].transcript.split(" ")
+      let list = document.getElementById("list")
 
       console.log("res: ", res)
 
-      //adding to list (update state)
+      for (let i = 0; i < res.length; i++) {
+        let label = editorElem(localElementCounter, res[i])
+        list.append(label)
+      }
+
+      /*adding to list (update state)
       let temp = state
-      //let tempC = count
       let size = Object.keys(temp).length
-      //let sizeC = Object.keys(tempC).length
       for (let i = 0; i < res.length; i++) {
         /*if (Number.isInteger(+res[i])) {
-          tempC[sizeC] = +res[i]
+          tempC[sizeC] = +res[i] //3->count but three isnt working
           sizeC += 1
-        } else {*/
+        } else {...
         temp[size] = res[i]
         size += 1
       }
       onChange({ ...temp })
+      */
       //точность надо? console.log('Confidence: ' + event.results[0][0].confidence);
     }
   }
