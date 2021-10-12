@@ -1,11 +1,22 @@
 .list-wrapper {
-  width: 100%;
+  width: 60%;
   height: 100%;
-  .list-header {
-  }
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  border: 1px solid black;
+  margin: 2%;
+  padding: 2%;
   .list {
     display: flex;
     flex-direction: column;
     justify-content: center;
+    .editor-list {
+      display: flex;
+      flex-direction: row;
+      justify-content: center;
+      align-items: space-around;
+    }
   }
 }
