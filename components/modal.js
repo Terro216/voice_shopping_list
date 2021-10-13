@@ -1,8 +1,7 @@
 import React, { useEffect } from "react"
-import editorElem from "./editorElem.js"
 import "./modal.scss"
 
-export default function Modal({ modal, closeModal }) {
+export default function Modal({ modal, closeModal, addOneToggle }) {
   useEffect(() => {
     //console.log(document.getElementById("modal"))
     if (modal.state === "on") {
@@ -85,8 +84,7 @@ export default function Modal({ modal, closeModal }) {
       console.log("res: ", res)
 
       for (let i = 0; i < res.length; i++) {
-        let label = editorElem(localElementCounter, res[i])
-        list.append(label)
+        addOneToggle(res[i])
       }
 
       closeModal({ state: "off", content: "closed" })
