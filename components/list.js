@@ -13,11 +13,7 @@ export default function List({
   let localElementCounter
   useEffect(() => {
     localElementCounter = Object.keys(count).length
-    if (addOneState == true) {
-      renderAreas("one")
-      addOneToggle()
-      return 0
-    }
+
     if (state[0] === "editor") {
       //set up editor
       document.getElementById("list").innerHTML = ""
@@ -33,32 +29,56 @@ export default function List({
         area.disabled = true
       }*/
     }
-  })
+  }, [state])
+
+  useEffect(() => {
+    if (addOneState.state == true) {
+      console.log(addOneState)
+      renderAreas("one", addOneState.data)
+      addOneToggle()
+    }
+  }, [addOneState])
+
+  /*
+  editorElem result:
+  <label class='editor-list>
+    <span class='list-cross' onClick={(e)=>deleteElem(e)}><svg cross></span>
+    <span class='list-id'>1.</span>
+    <textarea class='list-field'>apple</textarea>
+    <textarea class='list-count'></textarea>
+  </label>
+  */
   function editorElem(val = "") {
-    let i = localElementCounter
     let label = document.createElement("label")
-    label.classList.add("editor-list")
-    let cross = document.createElement("span") //from div
+    label.classList.add("editor-elem")
+    let cross = document.createElement("span")
     let id = document.createElement("span")
     let txt = document.createElement("textarea")
-    let counter = document.createElement("textarea") //change from div
+    let counter = document.createElement("textarea")
     counter.classList.add("list-count")
     counter.innerHTML =
-      count[i] === undefined || !Number.isInteger(+count[i]) ? 1 : +count[i]
+      count[localElementCounter] === undefined ||
+      !Number.isInteger(+count[localElementCounter])
+        ? 1
+        : +count[localElementCounter]
     cross.innerHTML = "X"
     cross.classList.add("list-cross")
     cross.onclick = (e) => {
       deleteElem(e)
     }
     id.classList.add("list-id")
-    id.innerHTML = i // == undefined ? localElementCounter : i
-    //localElementCounter += 1
-    txt.value = state[i] === undefined ? val : state[i]
+    id.innerHTML = localElementCounter // == undefined ? localElementCounter : i
+
+    txt.value =
+      state[localElementCounter] === undefined
+        ? val
+        : state[localElementCounter]
     txt.classList.add("list-field")
     label.append(cross)
     label.append(id)
     label.append(txt)
     label.append(counter)
+    localElementCounter += 1
     return label
   }
 
@@ -71,8 +91,12 @@ export default function List({
     ) {
       if (document.getElementById("list").childNodes[i] == elem) {
         document.getElementById("list").childNodes[i].remove()
-        // i += 1 //+ editor setting
-        // console.log(i)
+        localElementCounter -= 1
+        for (let j = i; j < localElementCounter; j++) {
+          let el = document.getElementById("list").childNodes[j].childNodes[1]
+          el.innerHTML = el.textContent - 1
+          //убрать разрыв в числах при удалении элемента
+        }
         break
       }
     }
@@ -98,33 +122,6 @@ export default function List({
       onChange({ ...temp }, { ...tempC })
       */
   }
-  /*
-  function editorElem(i, val = "") {
-    let label = document.createElement("label")
-    label.classList.add("editor-list")
-    let cross = document.createElement("span") //from div
-    let id = document.createElement("span")
-    let txt = document.createElement("textarea")
-    let counter = document.createElement("textarea") //change from div
-    counter.classList.add("list-count")
-    counter.innerHTML =
-      count[i] === undefined || !Number.isInteger(+count[i]) ? 1 : +count[i]
-    cross.innerHTML = "X"
-    cross.classList.add("list-cross")
-    cross.onclick = (e) => {
-      deleteElem(e)
-    }
-    id.classList.add("list-id")
-    id.innerHTML = i == undefined ? localElementCounter : i
-    localElementCounter += 1
-    txt.value = state[i] === undefined ? val : state[i]
-    txt.classList.add("list-field")
-    label.append(cross)
-    label.append(id)
-    label.append(txt)
-    label.append(counter)
-    return label
-  }*/
 
   function renderItems() {
     let list = document.getElementById("list")
@@ -136,24 +133,24 @@ export default function List({
     }
   }
 
-  function renderAreas(prop) {
+  function renderAreas(prop, data) {
+    let list = document.getElementById("list")
     if (prop == "one") {
       //one = add one area
-      let list = document.getElementById("list")
+      console.log("one")
 
-      let label = editorElem()
-      localElementCounter += 1
+      let label = editorElem(data)
+      console.log(label)
 
       list.append(label)
       return 0
     }
-    let list = document.getElementById("list")
     localElementCounter = 1 //Object.keys(count)[Object.keys(count).length - 1]
     while (localElementCounter < Object.keys(state).length) {
       let label = editorElem()
       list.append(label)
-      localElementCounter += 1
     }
+    localElementCounter -= 1 //что бы реальное колво показывал
   }
 
   return (

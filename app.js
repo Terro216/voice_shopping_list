@@ -27,7 +27,10 @@ function App() {
     content: "voice",
   })
   const [url, setUrl] = useState("")
-  const [addOneState, addOne] = useState(false)
+  const [addOneState, addOne] = useState({
+    state: false,
+    data: "",
+  })
 
   useEffect(async () => {
     //let params = window.location.pathname.substring(22); git
@@ -71,11 +74,13 @@ function App() {
     setModal({ ...e })
   }
 
-  function addOneToggle(e) {
+  function addOneToggle(e = 0) {
+    let val = e == 0 ? "" : e //addOneState.data : e
+    console.log("toggle")
     if (addOneState == false) {
-      addOne(true)
+      addOne({ state: true, data: val })
     } else {
-      addOne(false)
+      addOne({ state: false, data: val })
     }
   }
 

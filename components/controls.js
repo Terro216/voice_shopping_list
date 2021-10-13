@@ -28,7 +28,7 @@ export default function Controls({
       onChange({ ...temp })
     } else {
       //добавить продукты
-      addOneToggle("one")
+      addOneToggle()
     }
   }
 
