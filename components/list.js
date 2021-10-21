@@ -1,45 +1,36 @@
 import React, { useEffect } from "react"
 import "./list.scss"
 
-//доделать связь между list controls и modal - что бы все могли добавить элемент через render areas one!!!!!!!
-
-export default function List({
-  state,
-  count,
-  showModal,
-  addOneToggle,
-  addOneState,
-}) {
-  let localElementCounter
-  useEffect(() => {
-    localElementCounter = Object.keys(count).length
-
-    if (state[0] === "editor") {
-      //set up editor
-      document.getElementById("list").innerHTML = ""
-      document.getElementsByClassName("voice-button-wrapper")[0].hidden = false
-      renderAreas()
-    } else {
-      //set up viewer
-      document.getElementById("list").innerHTML = ""
-      document.getElementsByClassName("voice-button-wrapper")[0].hidden = true
-      renderItems()
-      /*let areas = document.getElementsByClassName("list-field")
+export default function List({ state, count, showModal, addOneToggle, addOneState }) {
+	let localElementCounter = document.getElementsByClassName("editor-elem").length || Object.keys(count).length
+	useEffect(() => {
+		if (state[0] === "editor") {
+			//set up editor
+			document.getElementById("list").innerHTML = ""
+			document.getElementsByClassName("voice-button-wrapper")[0].hidden = false
+			renderAreas()
+		} else {
+			//set up viewer
+			document.getElementById("list").innerHTML = ""
+			document.getElementsByClassName("voice-button-wrapper")[0].hidden = true
+			renderItems()
+			/*let areas = document.getElementsByClassName("list-field")
       for (let area of areas) {
         area.disabled = true
       }*/
-    }
-  }, [state])
+		}
+	}, [state])
 
-  useEffect(() => {
-    if (addOneState.state == true) {
-      console.log(addOneState)
-      renderAreas("one", addOneState.data)
-      addOneToggle()
-    }
-  }, [addOneState])
+	useEffect(() => {
+		if (addOneState.state == true) {
+			localElementCounter += 1
+			//console.log(localElementCounter) //why undefined
+			renderAreas("one", addOneState.data)
+			addOneToggle()
+		}
+	}, [addOneState])
 
-  /*
+	/*
   editorElem result:
   <label class='editor-list>
     <span class='list-cross' onClick={(e)=>deleteElem(e)}><svg cross></span>
@@ -48,59 +39,102 @@ export default function List({
     <textarea class='list-count'></textarea>
   </label>
   */
-  function editorElem(val = "") {
-    let label = document.createElement("label")
-    label.classList.add("editor-elem")
-    let cross = document.createElement("span")
-    let id = document.createElement("span")
-    let txt = document.createElement("textarea")
-    let counter = document.createElement("textarea")
-    counter.classList.add("list-count")
-    counter.innerHTML =
-      count[localElementCounter] === undefined ||
-      !Number.isInteger(+count[localElementCounter])
-        ? 1
-        : +count[localElementCounter]
-    cross.innerHTML = "X"
-    cross.classList.add("list-cross")
-    cross.onclick = (e) => {
-      deleteElem(e)
-    }
-    id.classList.add("list-id")
-    id.innerHTML = localElementCounter // == undefined ? localElementCounter : i
+	function editorElem(val = "") {
+		console.log(localElementCounter)
+		let label = document.createElement("label")
+		label.classList.add("editor-elem")
 
-    txt.value =
-      state[localElementCounter] === undefined
-        ? val
-        : state[localElementCounter]
-    txt.classList.add("list-field")
-    label.append(cross)
-    label.append(id)
-    label.append(txt)
-    label.append(counter)
-    localElementCounter += 1
-    return label
-  }
+		let cross = document.createElement("span")
+		cross.innerHTML = "X"
+		cross.classList.add("list-cross")
+		cross.onclick = (e) => {
+			deleteElem(e)
+		}
 
-  function deleteElem(e) {
-    let elem = e.path[1]
-    for (
-      let i = 0;
-      i < document.getElementById("list").childNodes.length;
-      i++
-    ) {
-      if (document.getElementById("list").childNodes[i] == elem) {
-        document.getElementById("list").childNodes[i].remove()
-        localElementCounter -= 1
-        for (let j = i; j < localElementCounter; j++) {
-          let el = document.getElementById("list").childNodes[j].childNodes[1]
-          el.innerHTML = el.textContent - 1
-          //убрать разрыв в числах при удалении элемента
-        }
-        break
-      }
-    }
-    /*deleting by removing from state.. unnecessary
+		let id = document.createElement("span")
+		id.classList.add("list-id")
+		id.innerHTML = localElementCounter == undefined ? Object.keys(count).length + 1 : localElementCounter
+
+		let txt = document.createElement("textarea")
+		txt.value = state[localElementCounter] === undefined ? val : state[localElementCounter]
+		txt.classList.add("list-field")
+
+		let counter = document.createElement("textarea")
+		counter.classList.add("list-count")
+		counter.innerHTML =
+			count[localElementCounter] === undefined || !Number.isInteger(+count[localElementCounter])
+				? 1
+				: +count[localElementCounter]
+
+		label.append(cross)
+		label.append(id)
+		label.append(txt)
+		label.append(counter)
+		localElementCounter += 1
+		return label
+	}
+
+	function deleteElem(e) {
+		let elem = e.path[1]
+		for (let i = 0; i < document.getElementById("list").childNodes.length; i++) {
+			if (document.getElementById("list").childNodes[i] == elem) {
+				document.getElementById("list").childNodes[i].remove()
+				localElementCounter = document.getElementById("list").childNodes.length
+				for (let j = 1; j <= localElementCounter; j++) {
+					let el = document.getElementById("list").childNodes[j - 1].childNodes[1]
+					el.innerHTML = j //el.textContent - 1
+					//убрать разрыв в числах при удалении элемента
+				}
+				break
+			}
+		}
+	}
+
+	function renderItems() {
+		let list = document.getElementById("list")
+		let size = Object.keys(state).length
+		for (let i = 1; i < size; i++) {
+			let item = document.createElement("div")
+			item.innerHTML = state[i] + " " + count[i] + " шт."
+			list.append(item)
+		}
+	}
+
+	function renderAreas(prop, data) {
+		let list = document.getElementById("list")
+		if (prop == "one") {
+			//one = add one area
+			console.log("one")
+
+			let label = editorElem(data)
+
+			list.append(label)
+			return 0
+		}
+		localElementCounter = 1 //Object.keys(count)[Object.keys(count).length - 1]
+		while (localElementCounter < Object.keys(state).length) {
+			let label = editorElem()
+			list.append(label)
+		}
+		localElementCounter -= 1 //что бы реальное колво показывал
+	}
+
+	return (
+		<div className="list-wrapper">
+			<div className="voice-button-wrapper">
+				<button onClick={() => showModal({ state: "on", content: "voice" })}>
+					<h1>Добавить элементы голосом</h1>
+				</button>
+				<p></p>
+			</div>
+			<div className="list" id="list">
+				{/* all content render here */}
+			</div>
+		</div>
+	)
+}
+
+/*deleting by removing from state.. unnecessary
   
       let temp = {}
       let tempC = {}
@@ -121,49 +155,3 @@ export default function List({
       console.log("temp", temp, tempC)
       onChange({ ...temp }, { ...tempC })
       */
-  }
-
-  function renderItems() {
-    let list = document.getElementById("list")
-    let size = Object.keys(state).length
-    for (let i = 1; i < size; i++) {
-      let item = document.createElement("div")
-      item.innerHTML = state[i] + " " + count[i] + " шт."
-      list.append(item)
-    }
-  }
-
-  function renderAreas(prop, data) {
-    let list = document.getElementById("list")
-    if (prop == "one") {
-      //one = add one area
-      console.log("one")
-
-      let label = editorElem(data)
-      console.log(label)
-
-      list.append(label)
-      return 0
-    }
-    localElementCounter = 1 //Object.keys(count)[Object.keys(count).length - 1]
-    while (localElementCounter < Object.keys(state).length) {
-      let label = editorElem()
-      list.append(label)
-    }
-    localElementCounter -= 1 //что бы реальное колво показывал
-  }
-
-  return (
-    <div className="list-wrapper">
-      <div className="voice-button-wrapper">
-        <button onClick={() => showModal({ state: "on", content: "voice" })}>
-          <h1>Добавить элементы голосом</h1>
-        </button>
-        <p></p>
-      </div>
-      <div className="list" id="list">
-        {/* all content render here */}
-      </div>
-    </div>
-  )
-}

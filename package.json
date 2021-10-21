@@ -21,8 +21,8 @@
     "url": "https://github.com/Terro216/voice_shopping_list/issues"
   },
   "devDependencies": {
-    "@babel/core": "^7.15.5",
-    "@babel/plugin-transform-runtime": "^7.15.0",
+    "@babel/core": "^7.15.8",
+    "@babel/plugin-transform-runtime": "^7.15.8",
     "@babel/preset-react": "^7.14.5",
     "firebase-admin": "^9.12.0",
     "gh-pages": "^3.2.3",
