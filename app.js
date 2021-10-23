@@ -10,7 +10,7 @@ import "./app.scss"
 
 function App() {
 	const [state, setState] = useState({
-		0: "editor", //editor or viewer...maybe SPLIT to ANOTHER STATE
+		0: "editor",
 		1: "молоко",
 		2: "хлеб",
 		3: "киви",
@@ -20,7 +20,7 @@ function App() {
 		1: 1,
 		2: 2,
 		3: 3,
-		4: 4, //finish here
+		4: 4,
 	})
 	const [modal, setModal] = useState({
 		state: "off",
@@ -28,10 +28,7 @@ function App() {
 		val: "",
 	})
 	const [url, setUrl] = useState("")
-	const [addOneState, addOne] = useState({
-		state: false,
-		data: "",
-	})
+	const [addOneState, addOne] = useState("")
 
 	useEffect(async () => {
 		//let params = window.location.pathname.substring(22); git
@@ -57,8 +54,8 @@ function App() {
 			setCount(newCounter)
 		}
 		setState(newState)
-		console.log("main state ", state)
-		console.log("main count ", count)
+		/*console.log("main state ", state)
+		console.log("main count ", count)*/
 	}
 
 	async function sharing() {
@@ -72,27 +69,16 @@ function App() {
 		setModal({ ...e })
 	}
 
-	function addOneToggle(e = 0) {
-		let val = e == 0 ? "" : e //addOneState.data : e
-		console.log("tog ", val)
-		if (addOneState.state == false) {
-			addOne({ state: true, data: val })
-		} else {
-			addOne({ state: false, data: val })
-		}
+	function addOneToggle(e) {
+		//let val.item = e === undefined ? val.item = (addOneState.item === "&zwnj;" ? "" : "&zwnj;") : e //addOneState.data : e
+		addOne(e)
 	}
 
 	return (
 		<div className="app">
 			<Modal modal={modal} closeModal={modalToggle} addOneToggle={addOneToggle} />
 			<Header state={state} />
-			<List
-				state={state}
-				count={count}
-				showModal={modalToggle}
-				addOneState={addOneState}
-				addOneToggle={addOneToggle}
-			/>
+			<List state={state} count={count} showModal={modalToggle} addOneState={addOneState} />
 			<Controls state={state} onChange={handleChange} onShare={sharing} addOneToggle={addOneToggle} />
 		</div>
 	)

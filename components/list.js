@@ -1,9 +1,11 @@
-import React, { useEffect } from "react"
+import React, { useEffect, useState } from "react"
 import "./list.scss"
 
-export default function List({ state, count, showModal, addOneToggle, addOneState }) {
+export default function List({ state, count, showModal, addOneState }) {
 	let localElementCounter = document.getElementsByClassName("editor-elem").length || Object.keys(count).length
+	let [addOnePrevious, setPrev] = useState({ item: undefined, colv: undefined })
 	useEffect(() => {
+		addOnePrevious = addOneState
 		if (state[0] === "editor") {
 			//set up editor
 			document.getElementById("list").innerHTML = ""
@@ -22,11 +24,16 @@ export default function List({ state, count, showModal, addOneToggle, addOneStat
 	}, [state])
 
 	useEffect(() => {
-		if (addOneState.state == true) {
+		//console.log(addOneState, "  now and prev:   ", addOnePrevious)
+		/*if (addOneState !== addOnePrevious) {
 			localElementCounter += 1
-			//console.log(localElementCounter) //why undefined
-			renderAreas("one", addOneState.data)
-			addOneToggle()
+			renderAreas("one", addOneState)
+			addOnePrevious = addOneState.item
+		}*/
+		if (addOneState.item !== addOnePrevious.item || addOneState.item === "") {
+			localElementCounter += 1
+			renderAreas("one", addOneState)
+			setPrev(addOneState) //addOnePrevious.item = addOneState.item
 		}
 	}, [addOneState])
 
@@ -34,13 +41,13 @@ export default function List({ state, count, showModal, addOneToggle, addOneStat
   editorElem result:
   <label class='editor-list>
     <span class='list-cross' onClick={(e)=>deleteElem(e)}><svg cross></span>
-    <span class='list-id'>1.</span>
+    <span class='list-id'>1</span>
     <textarea class='list-field'>apple</textarea>
-    <textarea class='list-count'></textarea>
+    <textarea class='list-count'>2</textarea>
   </label>
   */
-	function editorElem(val = "") {
-		console.log(localElementCounter)
+	function editorElem(val) {
+		//1 элемент редактора
 		let label = document.createElement("label")
 		label.classList.add("editor-elem")
 
@@ -55,26 +62,27 @@ export default function List({ state, count, showModal, addOneToggle, addOneStat
 		id.classList.add("list-id")
 		id.innerHTML = localElementCounter == undefined ? Object.keys(count).length + 1 : localElementCounter
 
-		let txt = document.createElement("textarea")
-		txt.value = state[localElementCounter] === undefined ? val : state[localElementCounter]
-		txt.classList.add("list-field")
+		let item = document.createElement("textarea")
+		item.value = val.item //state[localElementCounter] === undefined ? val.item : state[localElementCounter]
+		item.classList.add("list-field")
 
 		let counter = document.createElement("textarea")
 		counter.classList.add("list-count")
-		counter.innerHTML =
+		counter.innerHTML = val.colv /*
 			count[localElementCounter] === undefined || !Number.isInteger(+count[localElementCounter])
-				? 1
-				: +count[localElementCounter]
+				? val.colv
+				: +count[localElementCounter]*/
 
 		label.append(cross)
 		label.append(id)
-		label.append(txt)
+		label.append(item)
 		label.append(counter)
 		localElementCounter += 1
 		return label
 	}
 
 	function deleteElem(e) {
+		//при нажатии на крест в редакторе
 		let elem = e.path[1]
 		for (let i = 0; i < document.getElementById("list").childNodes.length; i++) {
 			if (document.getElementById("list").childNodes[i] == elem) {
@@ -104,16 +112,13 @@ export default function List({ state, count, showModal, addOneToggle, addOneStat
 		let list = document.getElementById("list")
 		if (prop == "one") {
 			//one = add one area
-			console.log("one")
-
 			let label = editorElem(data)
-
 			list.append(label)
 			return 0
 		}
 		localElementCounter = 1 //Object.keys(count)[Object.keys(count).length - 1]
 		while (localElementCounter < Object.keys(state).length) {
-			let label = editorElem()
+			let label = editorElem({ item: state[localElementCounter], colv: count[localElementCounter] })
 			list.append(label)
 		}
 		localElementCounter -= 1 //что бы реальное колво показывал

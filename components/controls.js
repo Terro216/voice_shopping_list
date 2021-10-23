@@ -5,16 +5,16 @@ export default function Controls({ state, onChange, onShare, addOneToggle }) {
 	useEffect(() => {
 		if (state[0] === "editor") {
 			//set up editor
-			document.getElementById("button1").innerHTML = "Добавить продукты"
-			document.getElementById("button2").innerHTML = "Готово"
+			document.getElementById("addOrEdit").innerHTML = "Добавить продукты"
+			document.getElementById("doneOrShare").innerHTML = "Готово"
 		} else {
 			//set up viewer
-			document.getElementById("button1").innerHTML = "Редактировать"
-			document.getElementById("button2").innerHTML = "Поделиться"
+			document.getElementById("addOrEdit").innerHTML = "Редактировать"
+			document.getElementById("doneOrShare").innerHTML = "Поделиться"
 		}
 	}, [state])
 
-	function button1() {
+	function addOrEdit() {
 		if (state[0] === "viewer") {
 			//редактировать
 			let temp = state
@@ -22,11 +22,11 @@ export default function Controls({ state, onChange, onShare, addOneToggle }) {
 			onChange({ ...temp })
 		} else {
 			//добавить продукты
-			addOneToggle()
+			addOneToggle({ item: "", colv: 1 })
 		}
 	}
 
-	function button2() {
+	function doneOrShare() {
 		if (state[0] === "editor") {
 			//готово
 			let temp = {} //state
@@ -38,7 +38,6 @@ export default function Controls({ state, onChange, onShare, addOneToggle }) {
 			for (let i = 0; i < areas.length; i++) {
 				let val = areas[i].value
 				let valC = +areasC[i].value
-				console.log(val.length)
 				if (val != "" && val.length != 0) {
 					temp[j] = val
 					if (!Number.isInteger(valC) || Number.isNaN(valC)) {
@@ -57,11 +56,11 @@ export default function Controls({ state, onChange, onShare, addOneToggle }) {
 
 	return (
 		<div className="controls">
-			<button onClick={button1} id="button1">
+			<button onClick={addOrEdit} id="addOrEdit">
 				Добавить продукты
 			</button>
 			{/*change list*/}
-			<button onClick={button2} id="button2">
+			<button onClick={doneOrShare} id="doneOrShare">
 				Сохранить
 			</button>
 			{/*share*/}

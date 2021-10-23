@@ -33,14 +33,15 @@ export default function Modal({ modal, closeModal, addOneToggle }) {
 		}
 		let info = document.createElement("div")
 		info.classList.add("voice-info")
-		info.innerHTML = "Нажмите на кнопку и перечислите продукты для добавления в список"
+		info.innerHTML =
+			"Нажмите на кнопку, перечислите продукты для добавления в список, затем скажите конец (или нажмите на фон)"
 		main.append(micro)
 		main.append(info)
 	}
 
 	function renderCopy(val) {
 		let newUrl = window.location.origin + "?" + val
-		console.log(newUrl)
+		//console.log(newUrl)
 
 		navigator.clipboard.writeText(newUrl)
 
@@ -48,7 +49,7 @@ export default function Modal({ modal, closeModal, addOneToggle }) {
 		let wrapper = document.createElement("div")
 		wrapper.classList.add("copy-wrapper")
 		let header = document.createElement("copy-header")
-		header.innerHTML = `<h2>Copyied!</h2>`
+		header.innerHTML = `<h2>Ссылка скопирована!</h2>`
 		let copyLine = document.createElement("textarea")
 		copyLine.innerText = newUrl
 		wrapper.append(header)
@@ -62,6 +63,20 @@ export default function Modal({ modal, closeModal, addOneToggle }) {
 
 	function voice() {
 		let recognition
+		const numsAlp = [
+			"один",
+			"два",
+			"три",
+			"четыре",
+			"пять",
+			"шесть",
+			"семь",
+			"восемь",
+			"девять",
+			"десять",
+			"одиннадцать",
+			"двенадцать",
+		]
 		try {
 			recognition = new webkitSpeechRecognition()
 		} catch (e) {
@@ -70,10 +85,16 @@ export default function Modal({ modal, closeModal, addOneToggle }) {
 		//const SpeechGrammarList = window.SpeechGrammarList || window.webkitSpeechGrammarList;
 		//const SpeechRecognitionEvent = window.SpeechRecognitionEvent || window.webkitSpeechRecognitionEvent;
 		recognition.lang = "ru-RU"
-		recognition.interimResults = false
+		recognition.interimResults = false //промежуточные
+		recognition.continuous = true
 		recognition.maxAlternatives = 1
 
 		recognition.start()
+
+		document.getElementsByClassName("modal-background")[0].onclick = function () {
+			recognition.stop()
+		}
+
 		console.log("Ready to receive a command.")
 
 		recognition.onaudiostart = function () {
@@ -81,26 +102,41 @@ export default function Modal({ modal, closeModal, addOneToggle }) {
 		}
 
 		recognition.onspeechend = function () {
-			recognition.stop()
-			// microphoneWrapper.style.visibility = 'visible'; hidden show again
-			// audioRecordAnimation.style.visibility = 'hidden';
-		}
-
-		recognition.onnomatch = function (event) {
-			//alert("Error. Please, try again")
+			closeModal({ state: "off", content: "closed" })
+			//конец по причине тишины
+			//recognition.start()
+			//microphoneWrapper.style.visibility = 'visible'; hidden show again
+			//audioRecordAnimation.style.visibility = 'hidden';
 		}
 
 		recognition.onresult = function (event) {
 			const last = event.results.length - 1
-			let res = event.results[last][0].transcript.split(" ")
+			let res = event.results[last][0].transcript.trim().split(" ")
 
 			console.log("res: ", res)
 
 			for (let i = 0; i < res.length; i++) {
-				addOneToggle(res[i])
+				console.log(res[i])
+				if (res[i] == "конец" || res[i] == "стоп" || res[i] == "всё") {
+					recognition.stop()
+					console.log("recognition stopped")
+					closeModal({ state: "off", content: "closed" })
+					break
+				}
+				if (numsAlp.includes(res[i + 1]) || Number.isInteger(+res[i + 1])) {
+					//если следующее - колво
+					if (Number.isInteger(+res[i + 1])) {
+						addOneToggle({ item: res[i], colv: +res[i + 1] })
+					} else {
+						addOneToggle({ item: res[i], colv: numsAlp.indexOf(res[i + 1]) + 1 })
+					}
+					i++
+				} else {
+					addOneToggle({ item: res[i], colv: 1 })
+				}
 			}
 
-			closeModal({ state: "off", content: "closed" })
+			//closeModal({ state: "off", content: "closed" })
 			//точность надо? console.log('Confidence: ' + event.results[0][0].confidence);
 		}
 	}
