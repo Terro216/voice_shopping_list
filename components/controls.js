@@ -1,5 +1,4 @@
 import React, { useEffect } from "react"
-import "./controls.scss"
 
 export default function Controls({ state, onChange, onShare, addOneToggle }) {
 	useEffect(() => {
@@ -54,13 +53,15 @@ export default function Controls({ state, onChange, onShare, addOneToggle }) {
 		}
 	}
 
+	const buttonStyle =
+		"border bg-blue-100 transition-colors hover:bg-blue-300 hover:text-white text-blue-900 text-center py-2 px-4 rounded transition-shadow shadow-md hover:shadow-xl transform transition-transform hover:scale-105"
 	return (
-		<div className="controls">
-			<button onClick={addOrEdit} id="addOrEdit">
+		<div className="w-full md:w-3/6 h-max flex flex-row justify-around items-center m-5">
+			<button className={buttonStyle} onClick={addOrEdit} id="addOrEdit">
 				Добавить продукты
 			</button>
 			{/*change list*/}
-			<button onClick={doneOrShare} id="doneOrShare">
+			<button className={buttonStyle} onClick={doneOrShare} id="doneOrShare">
 				Сохранить
 			</button>
 			{/*share*/}

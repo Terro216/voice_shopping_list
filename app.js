@@ -6,7 +6,7 @@ import Header from "./components/header.js"
 import Controls from "./components/controls.js"
 import db from "./components/firebase.js"
 import { collection, addDoc, getDoc, doc } from "firebase/firestore"
-import "./app.scss"
+import "./components/tailwind.css"
 
 function App() {
 	const [state, setState] = useState({
@@ -59,7 +59,6 @@ function App() {
 	}
 
 	async function sharing() {
-		//форма копирования открывается в модалке
 		const docRef = await addDoc(collection(db, "lists"), { state, count })
 		console.log("Document written with ID: ", docRef.id)
 		modalToggle({ state: "on", content: "copy", val: docRef.id }) //check if working or back it setModal({ state: "on", content: "copy" })
@@ -70,12 +69,11 @@ function App() {
 	}
 
 	function addOneToggle(e) {
-		//let val.item = e === undefined ? val.item = (addOneState.item === "&zwnj;" ? "" : "&zwnj;") : e //addOneState.data : e
 		addOne(e)
 	}
 
 	return (
-		<div className="app">
+		<div className="w-full h-full flex flex-col justify-center items-center">
 			<Modal modal={modal} closeModal={modalToggle} addOneToggle={addOneToggle} />
 			<Header state={state} />
 			<List state={state} count={count} showModal={modalToggle} addOneState={addOneState} />
