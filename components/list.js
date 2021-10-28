@@ -1,35 +1,28 @@
 import React, { useEffect, useState } from "react"
-import "./list.scss"
+import * as removeICON from "./remove.png"
 
 export default function List({ state, count, showModal, addOneState }) {
-	let localElementCounter = document.getElementsByClassName("editor-elem").length || Object.keys(count).length
+	let localElementCounter = document.querySelectorAll("[id=editor-wrapper]").length //|| Object.keys(count).length
 	let [addOnePrevious, setPrev] = useState({ item: undefined, colv: undefined })
 	useEffect(() => {
 		addOnePrevious = addOneState
 		if (state[0] === "editor") {
 			//set up editor
 			document.getElementById("list").innerHTML = ""
-			document.getElementsByClassName("voice-button-wrapper")[0].hidden = false
+			document.getElementById("voice-button-wrapper").hidden = false
 			renderAreas()
+			setTimeout(() => {
+				window.scrollTo(0, 0) //-document.getElementById("head").scrollHeight)
+			}, 3) //что бы после появления последнего элемента при первой отрисовке возвращал наверх
 		} else {
 			//set up viewer
 			document.getElementById("list").innerHTML = ""
-			document.getElementsByClassName("voice-button-wrapper")[0].hidden = true
+			document.getElementById("voice-button-wrapper").hidden = true
 			renderItems()
-			/*let areas = document.getElementsByClassName("list-field")
-      for (let area of areas) {
-        area.disabled = true
-      }*/
 		}
 	}, [state])
 
 	useEffect(() => {
-		//console.log(addOneState, "  now and prev:   ", addOnePrevious)
-		/*if (addOneState !== addOnePrevious) {
-			localElementCounter += 1
-			renderAreas("one", addOneState)
-			addOnePrevious = addOneState.item
-		}*/
 		if (addOneState.item !== addOnePrevious.item || addOneState.item === "") {
 			localElementCounter += 1
 			renderAreas("one", addOneState)
@@ -38,61 +31,98 @@ export default function List({ state, count, showModal, addOneState }) {
 	}, [addOneState])
 
 	/*
-  editorElem result:
-  <label class='editor-list>
-    <span class='list-cross' onClick={(e)=>deleteElem(e)}><svg cross></span>
-    <span class='list-id'>1</span>
-    <textarea class='list-field'>apple</textarea>
-    <textarea class='list-count'>2</textarea>
-  </label>
+		editorElem result:
+		<label>
+			<div><img onClick={(e)=>deleteElem(e)}></img>
+			<span>1</span></div>
+			<div><input>apple</input>
+			<input>2</input></div>
+		</label>
   */
 	function editorElem(val) {
 		//1 элемент редактора
-		let label = document.createElement("label")
-		label.classList.add("editor-elem")
 
-		let cross = document.createElement("span")
-		cross.innerHTML = "X"
-		cross.classList.add("list-cross")
+		let wrapper = document.createElement("div")
+		wrapper.id = "editor-wrapper"
+		wrapper.className =
+			"editor-elem flex flex-col justify-center items-center w-full mt-4 p-2 transform scale-0 new"
+
+		let crossId = document.createElement("div")
+		crossId.className = "w-2/3 h-full flex flex-row justify-around items-center p-2"
+		let cross = document.createElement("img")
+		cross.src = removeICON
+		cross.className = "w-9 rounded-full h-max border-2 border-blue-300"
 		cross.onclick = (e) => {
 			deleteElem(e)
 		}
-
 		let id = document.createElement("span")
-		id.classList.add("list-id")
-		id.innerHTML = localElementCounter == undefined ? Object.keys(count).length + 1 : localElementCounter
+		id.className = "w-max h-max flex justify-center items-center text-lg border border-dashed rounded p-2"
+		id.innerText =
+			"№ " + (localElementCounter == undefined ? Object.keys(count).length + 1 : localElementCounter)
+		crossId.append(cross)
+		crossId.append(id)
 
-		let item = document.createElement("textarea")
-		item.value = val.item //state[localElementCounter] === undefined ? val.item : state[localElementCounter]
-		item.classList.add("list-field")
+		let labelItem = document.createElement("label")
+		labelItem.innerText = "Название: "
+		labelItem.className = "w-max" ////////////////////////////////////////////////////////////////////////////////
+		let item = document.createElement("input")
+		item.className = "list-field w-max h-auto border"
+		item.value = val.item
+		labelItem.append(item)
 
-		let counter = document.createElement("textarea")
-		counter.classList.add("list-count")
-		counter.innerHTML = val.colv /*
-			count[localElementCounter] === undefined || !Number.isInteger(+count[localElementCounter])
-				? val.colv
-				: +count[localElementCounter]*/
+		let labelCounter = document.createElement("label")
+		labelCounter.innerText = "Количество: "
+		let counter = document.createElement("input")
+		counter.className = "list-count w-max border"
+		counter.value = val.colv
+		labelCounter.append(counter)
 
-		label.append(cross)
-		label.append(id)
-		label.append(item)
-		label.append(counter)
+		wrapper.append(crossId)
+		wrapper.append(labelItem)
+		wrapper.append(labelCounter)
+		setTimeout(() => {
+			let wrapper = document.getElementsByClassName("new")[0]
+			wrapper.classList.remove("new")
+			wrapper.classList.add("transition", "duration-300", "ease-out", "scale-100", "new1")
+			window.scrollTo(0, document.body.scrollHeight + document.getElementById("addOrEdit").scrollHeight)
+			setTimeout(() => {
+				let wrapper = document.getElementsByClassName("new1")[0]
+				wrapper.classList.remove(
+					"transition",
+					"duration-300",
+					"ease-out",
+					"scale-100",
+					"transform",
+					"scale-0",
+					"new1"
+				)
+			}, 300)
+		}, 1)
 		localElementCounter += 1
-		return label
+
+		return wrapper
 	}
 
 	function deleteElem(e) {
 		//при нажатии на крест в редакторе
-		let elem = e.path[1]
-		for (let i = 0; i < document.getElementById("list").childNodes.length; i++) {
-			if (document.getElementById("list").childNodes[i] == elem) {
-				document.getElementById("list").childNodes[i].remove()
-				localElementCounter = document.getElementById("list").childNodes.length
-				for (let j = 1; j <= localElementCounter; j++) {
-					let el = document.getElementById("list").childNodes[j - 1].childNodes[1]
-					el.innerHTML = j //el.textContent - 1
-					//убрать разрыв в числах при удалении элемента
-				}
+		let elem = e.path[2]
+		for (let i = 0; i < document.querySelectorAll("[id=editor-wrapper]").length; i++) {
+			if (document.querySelectorAll("[id=editor-wrapper]")[i] == elem) {
+				document
+					.querySelectorAll("[id=editor-wrapper]")
+					[i].classList.add("transition", "duration-300", "ease-out", "transform", "scale-0")
+
+				setTimeout(() => {
+					document.querySelectorAll("[id=editor-wrapper]")[i].remove()
+
+					localElementCounter = document.querySelectorAll("[id=editor-wrapper]").length
+					for (let j = 1; j <= localElementCounter; j++) {
+						//убрать разрыв в числах при удалении элемента
+						let el = document.querySelectorAll("[id=editor-wrapper]")[j - 1].childNodes[0].childNodes[1]
+						el.innerHTML = "№ " + j //el.textContent - 1
+					}
+				}, 300)
+
 				break
 			}
 		}
@@ -112,10 +142,11 @@ export default function List({ state, count, showModal, addOneState }) {
 		let list = document.getElementById("list")
 		if (prop == "one") {
 			//one = add one area
-			let label = editorElem(data)
-			list.append(label)
+			let wrapper = editorElem(data)
+			list.append(wrapper)
 			return 0
 		}
+
 		localElementCounter = 1 //Object.keys(count)[Object.keys(count).length - 1]
 		while (localElementCounter < Object.keys(state).length) {
 			let label = editorElem({ item: state[localElementCounter], colv: count[localElementCounter] })
@@ -125,38 +156,15 @@ export default function List({ state, count, showModal, addOneState }) {
 	}
 
 	return (
-		<div className="list-wrapper">
-			<div className="voice-button-wrapper">
+		<div className="w-11/12 md:w-3/6 h-auto md:h-3/6 flex flex-col justify-center items-center m-2 p-2 border">
+			<div id="voice-button-wrapper" className="border">
 				<button onClick={() => showModal({ state: "on", content: "voice" })}>
-					<h1>Добавить элементы голосом</h1>
+					Добавить элементы голосом
 				</button>
-				<p></p>
 			</div>
-			<div className="list" id="list">
+			<div className="w-max h-max flex flex-col justify-center" id="list">
 				{/* all content render here */}
 			</div>
 		</div>
 	)
 }
-
-/*deleting by removing from state.. unnecessary
-  
-      let temp = {}
-      let tempC = {}
-      let x = 0
-      for (let [key, val] of Object.entries(state)) {
-        if (key != i) {
-          //all excepting item to delete
-          console.log(temp, tempC)
-          temp[x] = val
-          if (count[x] != undefined) {
-            tempC[x] = count[x]
-          }
-          x += 1
-          console.log(temp, tempC)
-          //tempC[x] = count[x] why dont upgrade state...
-        }
-      }
-      console.log("temp", temp, tempC)
-      onChange({ ...temp }, { ...tempC })
-      */

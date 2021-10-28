@@ -2,14 +2,16 @@
   "name": "voice_shopping_list",
   "version": "0.0.1",
   "description": "shopping list with speech input",
-  "main": "index.html",
+  "source": "index.html",
+  "browserslist": "> 0.5%, last 2 years, not dead",
   "homepage": "https://Terro216.github.io/voice_shopping_list/",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "parcel index.html",
     "build": "parcel build index.html --out-dir public --public-url ./",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d public"
+    "deploy": "gh-pages -d public",
+    "watch:css": "postcss ./components/tailwind.css -o ./components/main.css"
   },
   "repository": {
     "type": "git",
@@ -24,10 +26,14 @@
     "@babel/core": "^7.15.8",
     "@babel/plugin-transform-runtime": "^7.15.8",
     "@babel/preset-react": "^7.14.5",
+    "autoprefixer": "^9.8.8",
     "firebase-admin": "^9.12.0",
     "gh-pages": "^3.2.3",
-    "parcel-bundler": "^1.12.5",
-    "sass": "^1.42.0"
+    "npm-run-all": "^4.1.5",
+    "parcel": "^2.0.0",
+    "postcss": "^8.0.0",
+    "postcss-cli": "^9.0.1",
+    "tailwindcss": "^2.2.17"
   },
   "dependencies": {
     "@babel/runtime": "^7.15.4",
