@@ -45,8 +45,9 @@ export default function Modal({ modal, closeModal, addOneToggle }) {
 			<p>Команды:<br>
 			<ul class="list-disc w-10/12 md:w-2/3 m-3">
 			<li>"Название продукта" - добавить один продукт</li>
-			<li>"Название продукта" и "цифра количества" - добавить несколько.<br> Пример: "Банан три"</li>
-			<li>"Конец", "Всё" - закончить ввод</li>
+			<li>"Название продукта" + "цифра количества" - добавить несколько<br> Пример: "Банан три"</li>
+			<li>"Отмена" - убрать последний элемент</li>
+			<li>"Конец" или "Всё" - закончить ввод</li>
 			</ul>`
 
 		let micro = document.createElement("div")
@@ -207,9 +208,7 @@ export default function Modal({ modal, closeModal, addOneToggle }) {
 					recognition.stop()
 					console.log("recognition stopped")
 					closeModal({ state: "off", content: "closed" })
-					break
-				}
-				if (numsAlp.includes(res[i + 1]) || Number.isInteger(+res[i + 1])) {
+				} else if (numsAlp.includes(res[i + 1]) || Number.isInteger(+res[i + 1])) {
 					//если следующее - колво
 					if (Number.isInteger(+res[i + 1])) {
 						addOneToggle({ item: res[i], colv: +res[i + 1] })
@@ -228,12 +227,12 @@ export default function Modal({ modal, closeModal, addOneToggle }) {
 	}
 
 	return (
-		<div className="absolute flex justify-center items-center hidden inset-0 h-full w-full z-20" id="modal">
+		<div className="absolute flex justify-center hidden inset-0 h-full w-full z-20 " id="modal">
 			<div
 				className="fixed bg-gray-600 bg-opacity-50 h-full w-full"
 				id="modal-background"
 				onClick={close}></div>
-			<div className="fixed flex flex-col bg-white w-10/12 md:w-6/12 h-max" id="modal-main">
+			<div className="fixed flex flex-col bg-white w-10/12 md:w-6/12 h-max my-16 md:my-2" id="modal-main">
 				hello from modal!
 			</div>
 		</div>
