@@ -11,8 +11,8 @@ export default function Header({ state }) {
 	})
 
 	return (
-		<header>
-			<h1 id="head" className="w-max font-medium font-mono text-3xl m-5 text-center">
+		<header className="flex justify-center items-center">
+			<h1 id="head" className="w-11/12 md:w-max font-medium font-mono text-3xl text-center m-5">
 				Редактор листа покупок
 			</h1>
 		</header>

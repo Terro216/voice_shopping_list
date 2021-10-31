@@ -65,7 +65,7 @@ export default function Modal({ modal, closeModal, addOneToggle }) {
 	}
 
 	function renderCopy(val) {
-		let newUrl = window.location.origin + "?" + val
+		let newUrl = window.location.origin + window.location.pathname + "?" + val
 		//console.log(newUrl)
 
 		navigator.clipboard.writeText(newUrl)
@@ -112,10 +112,10 @@ export default function Modal({ modal, closeModal, addOneToggle }) {
 		main.append(wrapper)
 
 		document.getElementById("modal-background").addEventListener("click", function () {
-			window.location = newUrl
+			window.location.href = newUrl
 		})
 		document.getElementById("close-modal-button").addEventListener("click", function () {
-			window.location = newUrl
+			window.location.href = newUrl
 			//window.onload = () => close()
 		})
 	}

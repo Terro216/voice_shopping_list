@@ -232,6 +232,7 @@ export default function List({ state, count, showModal, addOneState }) {
 			//one = add one area
 			let wrapper = editorElem(data)
 			list.append(wrapper)
+			//ReactDOM.render(<EditorElem val={data} localElementCounter={localElementCounter} />, list) maybe split...
 			return 0
 		}
 

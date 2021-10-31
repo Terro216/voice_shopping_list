@@ -4,13 +4,13 @@
   "description": "shopping list with speech input",
   "source": "index.html",
   "browserslist": "> 0.5%, last 2 years, not dead",
-  "homepage": "https://Terro216.github.io/voice_shopping_list/",
+  "homepage": "https://terro216.github.io/voice_shopping_list/",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "parcel index.html",
-    "build": "parcel build index.html --out-dir public --public-url ./",
+    "build": "parcel build index.html --dist-dir public --public-url ./",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d public",
+    "deploy": "gh-pages -d public -b gh-pages-test",
     "watch:css": "postcss ./components/tailwind.css -o ./components/main.css"
   },
   "repository": {
