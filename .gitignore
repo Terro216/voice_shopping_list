@@ -9,6 +9,7 @@ lerna-debug.log*
 
 #private
 private.js
+editorElem.js
 firebase.json
 .firebaserc
 public/
