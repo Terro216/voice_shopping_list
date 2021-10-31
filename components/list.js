@@ -28,8 +28,12 @@ export default function List({ state, count, showModal, addOneState }) {
 	useEffect(() => {
 		if (addOneState.item !== addOnePrevious.item || addOneState.item === "") {
 			localElementCounter += 1
-			renderAreas("one", addOneState)
-			setPrev(addOneState)
+			if (addOneState.item === "Отмена") {
+				deleteElem(0, "modal")
+			} else {
+				renderAreas("one", addOneState)
+				setPrev(addOneState)
+			}
 		}
 	}, [addOneState])
 
@@ -193,6 +197,9 @@ export default function List({ state, count, showModal, addOneState }) {
 			e.path[1].childNodes[1].childNodes.forEach((elem) => {
 				elem.classList.toggle("line-through")
 			})
+		} else if (now === "modal") {
+			let list = document.getElementById("list")
+			list.childNodes[list.childNodes.length - 1].remove()
 		}
 	}
 

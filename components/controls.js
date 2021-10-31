@@ -10,6 +10,7 @@ export default function Controls({ state, onChange, onShare, addOneToggle }) {
 			//set up viewer
 			document.getElementById("addOrEdit").innerHTML = "Редактировать"
 			document.getElementById("doneOrShare").innerHTML = "Поделиться"
+			window.scrollTo(0, 0)
 		}
 	}, [state])
 
