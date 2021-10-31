@@ -1,5 +1,5 @@
 import React, { useEffect } from "react"
-import * as microPNG from "./micro.png"
+import * as microPNG from "../files/micro.png"
 
 //* команда отмена = удалить последнее
 
@@ -40,17 +40,17 @@ export default function Modal({ modal, closeModal, addOneToggle }) {
 
 		let info = document.createElement("div")
 		info.className =
-			"w-full md:w-2/3 h-auto m-auto text-center shadow-md flex flex-col justify-center items-center"
+			"w-full md:w-2/3 h-auto mx-auto mt-10 text-center shadow-md flex flex-col justify-center items-center"
 		info.innerHTML = `Нажмите на кнопку и начните говорить
-			<br>Команды:<br>
-			<ul class="list-disc w-full md:w-2/3 m-3">
+			<p>Команды:<br>
+			<ul class="list-disc w-10/12 md:w-2/3 m-3">
 			<li>"Название продукта" - добавить один продукт</li>
 			<li>"Название продукта" и "цифра количества" - добавить несколько.<br> Пример: "Банан три"</li>
-			<li>"Конец", "Всё" (или закрытие окна) - закончить ввод</li>
+			<li>"Конец", "Всё" - закончить ввод</li>
 			</ul>`
 
 		let micro = document.createElement("div")
-		micro.className = "w-max h-max m-auto px-4 py-4 border rounded-full hover:shadow-lg"
+		micro.className = "w-max h-max mx-auto my-8 px-4 py-4 border rounded-full hover:shadow-lg"
 		micro.innerHTML = `<img class="w-19" src="${microPNG}"/>`
 		micro.onclick = (e) => {
 			voice()
@@ -233,9 +233,7 @@ export default function Modal({ modal, closeModal, addOneToggle }) {
 				className="fixed bg-gray-600 bg-opacity-50 h-full w-full"
 				id="modal-background"
 				onClick={close}></div>
-			<div
-				className="fixed flex flex-col justify-around items-s bg-white w-10/12 md:w-6/12 h-max"
-				id="modal-main">
+			<div className="fixed flex flex-col bg-white w-10/12 md:w-6/12 h-max" id="modal-main">
 				hello from modal!
 			</div>
 		</div>

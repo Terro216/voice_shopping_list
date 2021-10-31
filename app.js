@@ -73,7 +73,7 @@ function App() {
 	}
 
 	return (
-		<div className="w-full h-full flex flex-col justify-center items-center">
+		<div className="w-full h-full flex flex-col justify-center items-center font-sans">
 			<Modal modal={modal} closeModal={modalToggle} addOneToggle={addOneToggle} />
 			<Header state={state} />
 			<List state={state} count={count} showModal={modalToggle} addOneState={addOneState} />
