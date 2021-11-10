@@ -3,7 +3,7 @@ import * as microPNG from "../files/micro.png"
 
 //* команда отмена = удалить последнее
 
-export default function Modal({ modal, closeModal, addOneToggle }) {
+export default React.memo(function Modal({ modal, closeModal, addOneToggle }) {
 	useEffect(() => {
 		//console.log(document.getElementById("modal"))
 		if (modal.state === "on") {
@@ -52,7 +52,7 @@ export default function Modal({ modal, closeModal, addOneToggle }) {
 
 		let micro = document.createElement("div")
 		micro.className = "w-max h-max mx-auto my-8 px-4 py-4 border rounded-full hover:shadow-lg"
-		micro.innerHTML = `<img class="w-19" src="${microPNG}"/>`
+		micro.innerHTML = `<img class="w-19" alt="кнопка включения микрофона" src="${microPNG}"/>`
 		micro.onclick = (e) => {
 			voice()
 		}
@@ -100,7 +100,7 @@ export default function Modal({ modal, closeModal, addOneToggle }) {
 		copyLine.type = "text"
 		copyLine.disabled = true
 		copyLine.className =
-			"w-11/12 md:w-1/2 h-max mt-2 mb-6 px-4 py-2 border rounded-lg text-gray-700 focus:outline-none focus:border-green-500"
+			"w-11/12 md:w-1/2 h-max mt-2 mb-6 px-4 py-2 border rounded-lg text-gray-700 focus:outline-none focus:border-green-500 select-all"
 		copyLine.value = newUrl
 
 		let button = createButton()
@@ -237,4 +237,4 @@ export default function Modal({ modal, closeModal, addOneToggle }) {
 			</div>
 		</div>
 	)
-}
+})

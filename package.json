@@ -10,7 +10,7 @@
     "start": "parcel index.html",
     "build": "parcel build index.html --dist-dir public --public-url ./",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d public -b gh-pages-test",
+    "deploy": "gh-pages -d public -b gh-pages",
     "watch:css": "postcss ./components/tailwind.css -o ./components/main.css"
   },
   "repository": {

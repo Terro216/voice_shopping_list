@@ -12,7 +12,7 @@ export default function Controls({ state, onChange, onShare, addOneToggle }) {
 			document.getElementById("doneOrShare").innerHTML = "Поделиться"
 			window.scrollTo(0, 0)
 		}
-	}, [state])
+	}, [state[0]])
 
 	function addOrEdit() {
 		if (state[0] === "viewer") {

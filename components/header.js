@@ -1,6 +1,6 @@
 import React, { useEffect } from "react"
 
-export default function Header({ state }) {
+export default React.memo(function Header({ state }) {
 	useEffect(() => {
 		if (state[0] === "editor") {
 			//set up editor
@@ -8,7 +8,7 @@ export default function Header({ state }) {
 		} else {
 			document.getElementById("head").innerHTML = "Ваш лист покупок"
 		}
-	})
+	}, [state[0]])
 
 	return (
 		<header className="flex justify-center items-center">
@@ -17,4 +17,4 @@ export default function Header({ state }) {
 			</h1>
 		</header>
 	)
-}
+})
