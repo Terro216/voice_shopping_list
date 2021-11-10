@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react"
 import ReactDOM from "react-dom"
 import List from "./components/list.js"
-import Modal from "./components/modal.js"
+const Modal = React.lazy(() => import("./components/modal.js"))
 import Header from "./components/header.js"
 import Controls from "./components/controls.js"
 import db from "./components/firebase.js"
@@ -64,17 +64,25 @@ function App() {
 		modalToggle({ state: "on", content: "copy", val: docRef.id }) //check if working or back it setModal({ state: "on", content: "copy" })
 	}
 
-	function modalToggle(e) {
-		setModal({ ...e })
-	}
+	const modalToggle = React.useCallback(
+		(e) => {
+			setModal({ ...e })
+		},
+		[modal]
+	)
 
-	function addOneToggle(e) {
-		addOne(e)
-	}
+	const addOneToggle = React.useCallback(
+		(e) => {
+			addOne(e)
+		},
+		[addOneState]
+	)
 
 	return (
 		<div className="w-full h-full flex flex-col justify-center items-center font-sans">
-			<Modal modal={modal} closeModal={modalToggle} addOneToggle={addOneToggle} />
+			<React.Suspense fallback={<></>}>
+				<Modal modal={modal} closeModal={modalToggle} addOneToggle={addOneToggle} />
+			</React.Suspense>
 			<Header state={state} />
 			<List state={state} count={count} showModal={modalToggle} addOneState={addOneState} />
 			<Controls state={state} onChange={handleChange} onShare={sharing} addOneToggle={addOneToggle} />

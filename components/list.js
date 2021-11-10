@@ -3,7 +3,9 @@ import * as removeICON from "../files/remove.png"
 import * as plusICON from "../files/plus.png"
 import * as minusICON from "../files/minus.png"
 import * as checkICON from "../files/check.png"
+import * as emptyICON from "../files/empty.png"
 
+//done -> edit = too long lines FIX
 export default function List({ state, count, showModal, addOneState }) {
 	let localElementCounter = document.querySelectorAll("[id=editor-wrapper]").length //|| Object.keys(count).length
 	let [addOnePrevious, setPrev] = useState({ item: undefined, colv: undefined })
@@ -37,18 +39,8 @@ export default function List({ state, count, showModal, addOneState }) {
 		}
 	}, [addOneState])
 
-	/*
-		editorElem result: //NOT TRUE FOR NOW || SPLIT COMP
-		<div id="editor-wrapper">
-			<div><img onClick={(e)=>deleteElem(e)}></img>
-			<span>1</span></div>
-			<div><input>apple</input>
-			<input>2</input></div>
-		</label>
-  */
 	function editorElem(val) {
 		//1 элемент редактора
-
 		let wrapper = document.createElement("div")
 		wrapper.id = "editor-wrapper"
 		wrapper.className =
@@ -57,9 +49,10 @@ export default function List({ state, count, showModal, addOneState }) {
 		let crossId = document.createElement("div")
 		crossId.className = "w-2/3 h-full flex flex-row justify-around items-center p-2"
 		let cross = document.createElement("img")
+		cross.alt = "Нажмите чтобы удалить элемент из списка"
 		cross.src = removeICON
 		cross.className =
-			"w-10 rounded-full h-max border-2 border-blue-300 transition-transform transform duration-300 ease-in-out hover:rotate-180 cursor-pointer"
+			"w-8 h-max transition-transform transform duration-300 ease-in-out hover:scale-110 cursor-pointer"
 		cross.onclick = (e) => {
 			deleteElem(e, "editor")
 		}
@@ -80,7 +73,8 @@ export default function List({ state, count, showModal, addOneState }) {
 		labelItem.append(item)
 
 		let counterWrapper = document.createElement("div")
-		counterWrapper.className = "w-10/12 md:w-4/12 h-max flex flex-row justify-around items-center"
+		counterWrapper.className =
+			"w-10/12 sm:w-5/12 md:w-5/12 lg:w-4/12 h-max flex flex-row justify-around items-center"
 
 		let counterScht = document.createElement("div")
 		counterScht.className = "w-2/6 flex flex-row justify-around"
@@ -95,7 +89,7 @@ export default function List({ state, count, showModal, addOneState }) {
 		counterScht.append(scht)
 
 		let increase = document.createElement("button")
-		increase.innerHTML = `<img class="w-9 h-max" src="${plusICON}">`
+		increase.innerHTML = `<img class="w-9 h-max" alt="увеличить количество" src="${plusICON}">`
 		increase.addEventListener("click", (e) => {
 			e.path[2].childNodes[1].childNodes[0].value++
 			console.log(e)
@@ -113,7 +107,7 @@ export default function List({ state, count, showModal, addOneState }) {
 			}, 100)
 		})
 		let decrease = document.createElement("button")
-		decrease.innerHTML = `<img class="w-8 h-max" src="${minusICON}">`
+		decrease.innerHTML = `<img class="w-8 h-max" alt="уменьшить количество" src="${minusICON}">`
 		decrease.addEventListener("click", (e) => {
 			;+e.path[2].childNodes[1].childNodes[0].value <= 1
 				? (e.path[2].childNodes[1].childNodes[0].value = 1)
@@ -186,17 +180,13 @@ export default function List({ state, count, showModal, addOneState }) {
 				}
 			}
 		} else if (now === "viewer") {
-			//console.log(e) //.path[1].childNodes[1])
-			if (e.srcElement.src === window.location.href) {
-				e.srcElement.src = checkICON
-			} else {
-				e.srcElement.src = " "
-			}
-
-			e.path[1].childNodes[1].classList.toggle("bg-gray-300")
-			e.path[1].childNodes[1].childNodes.forEach((elem) => {
-				elem.classList.toggle("line-through")
-			})
+			console.log(e)
+			e.target.src = e.target.src == checkICON ? emptyICON : checkICON
+			e.path[2].childNodes[1].classList.toggle("line-through")
+			e.path[2].childNodes[1].classList.toggle("bg-gray-300")
+			//e.path[2].childNodes[1].childNodes.forEach((elem) => {
+			//	elem.classList.toggle("line-through")
+			//})
 		} else if (now === "modal") {
 			let list = document.getElementById("list")
 			list.childNodes[list.childNodes.length - 1].remove()
@@ -209,13 +199,19 @@ export default function List({ state, count, showModal, addOneState }) {
 		let size = Object.keys(state).length
 		for (let i = 1; i < size; i++) {
 			let elem = document.createElement("div")
-			elem.className = "w-full md:w-1/2 h-max flex flex-row justify-around items-center p-3 mt-6 "
-			let check = document.createElement("img")
-			check.src = " "
+			elem.className = "w-full md:w-1/2 h-max flex flex-row justify-around items-center p-3 mt-6"
+
+			let check = document.createElement("div")
+			let checkImg = document.createElement("img")
+			checkImg.alt = "Вычеркнуть элемент из списка"
+			checkImg.src = emptyICON
+			checkImg.className = "w-full h-full rounded-full select-none"
 			check.className = "w-8 h-8 rounded-full border-2 border-blue-300"
-			check.onclick = (e) => {
+			checkImg.onclick = (e) => {
 				deleteElem(e, "viewer")
 			}
+			check.append(checkImg)
+
 			let item = document.createElement("div")
 			item.className =
 				"w-10/12 h-12 flex items-center justify-center divide-x border rounded shadow-sm text-lg"
@@ -238,6 +234,14 @@ export default function List({ state, count, showModal, addOneState }) {
 
 		localElementCounter = 1 //Object.keys(count)[Object.keys(count).length - 1]
 		while (localElementCounter < Object.keys(state).length) {
+			/*ReactDOM.render(
+				<EditorElem
+					deleteElem={deleteElem}
+					val={{ item: state[localElementCounter], colv: count[localElementCounter] }}
+					localElementCounter={localElementCounter}
+				/>,
+				label)
+			localElementCounter += 1*/
 			let label = editorElem({ item: state[localElementCounter], colv: count[localElementCounter] })
 			list.append(label)
 		}
