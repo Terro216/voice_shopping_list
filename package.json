@@ -1,53 +1,50 @@
 {
-  "name": "voice_shopping_list",
+  "name": "voice-shopping-list",
+  "private": true,
   "version": "0.0.1",
-  "description": "shopping list with speech input",
-  "source": "index.html",
-  "browserslist": "> 0.5%, last 2 years, not dead",
-  "homepage": "https://terro216.github.io/voice_shopping_list/",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "parcel index.html",
-    "build": "parcel build index.html --dist-dir public --public-url ./",
-    "predeploy": "npm run build",
-    "deploy": "gh-pages -d public -b gh-pages",
-    "watch:css": "postcss ./components/tailwind.css -o ./components/main.css"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Terro216/voice_shopping_list.git"
-  },
-  "author": "ilyamed",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/Terro216/voice_shopping_list/issues"
-  },
-  "devDependencies": {
-    "@babel/core": "^7.15.8",
-    "@babel/plugin-transform-runtime": "^7.15.8",
-    "@babel/preset-react": "^7.14.5",
-    "autoprefixer": "^9.8.8",
-    "firebase-admin": "^9.12.0",
-    "gh-pages": "^3.2.3",
-    "npm-run-all": "^4.1.5",
-    "parcel": "^2.0.0",
-    "postcss": "^8.0.0",
-    "postcss-cli": "^9.0.1",
-    "tailwindcss": "^2.2.17"
+    "dev": "vite",
+    "start": "node server/index.js",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
-    "@babel/runtime": "^7.15.4",
-    "firebase": "^9.1.1",
-    "path": "^0.12.7",
-    "react": "^17.0.2",
-    "react-dom": "^17.0.2"
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^12.8.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.2",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-hot-toast": "^2.6.0",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
   },
-  "babel": {
-    "presets": [
-      "@babel/preset-react"
-    ],
-    "plugins": [
-      "@babel/plugin-transform-runtime"
-    ]
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^9.17.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "globals": "^15.14.0",
+    "jsdom": "^29.0.1",
+    "typescript": "~5.6.2",
+    "typescript-eslint": "^8.18.2",
+    "vite": "^6.0.5",
+    "vite-plugin-pwa": "^0.21.1",
+    "vitest": "^4.1.2"
   }
 }
