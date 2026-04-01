@@ -1,0 +1,16 @@
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    labels:
+      caddy: shopping.${DOMAIN}
+      caddy.reverse_proxy: "{{upstreams 3000}}"
+    networks:
+      - caddy_net
+
+networks:
+  caddy_net:
+    external: true
