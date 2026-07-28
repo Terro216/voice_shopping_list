@@ -7,8 +7,20 @@ Express 5 + SQLite (better-sqlite3) + Socket.IO on the backend.
 
 - **Voice input** (Web Speech API, Russian/English): "добавь молоко и 2 хлеба" →
   items with quantities. Saying an existing item again bumps its count.
+- **Voice commands**: "вычеркни молоко" checks off, "удали хлеб" removes,
+  "очисти купленное" clears the cart, "отмена" undoes the last action. Fuzzy
+  matching handles inflected forms ("молока" → «молоко»).
+- **Bought state**: tap an item to check it off — it sinks to the bottom with a
+  strikethrough; "Clear bought" wipes the cart after checkout. The screen stays
+  awake (Wake Lock) while the mic is listening.
+- **Suggestions**: unobtrusive autocomplete from purchase history while typing,
+  plus a "Frequent" chip row for one-tap re-adds.
 - **Shared lists**: "🔗 Share" copies a `?list=USERNAME` link; anyone logged in
-  can open and edit that list, changes sync live over WebSockets.
+  can open and edit that list, changes sync live over WebSockets, and a 👀 row
+  shows who is viewing the list right now.
+- **Web Push**: the 🔔 bell subscribes a device to a list — others' changes
+  arrive as a batched notification (silent when the app is focused). Requires
+  VAPID keys in `.env`; the bell hides itself when unconfigured.
 - **Offline-first PWA**: mutations made offline are queued in localStorage and
   replayed (in order, with a fresh token) when the connection returns.
 - **Auth**: username/password (bcrypt), JWT for 7 days.

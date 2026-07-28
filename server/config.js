@@ -22,4 +22,8 @@ export const config = {
   jwtSecret,
   tokenTtl: "7d",
   bcryptRounds: 10,
+  // Web Push is optional: without keys the feature is simply disabled.
+  vapidPublicKey: process.env.VAPID_PUBLIC_KEY || null,
+  vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || null,
+  vapidSubject: process.env.VAPID_SUBJECT || "mailto:admin@example.com",
 };

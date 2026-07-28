@@ -58,7 +58,12 @@ function App() {
   return (
     <div className={styles.appWrapper}>
       <Toaster position="top-right" />
-      <ShoppingList key={activeList} username={activeList} onLogout={handleLogout} />
+      <ShoppingList
+        key={activeList}
+        username={activeList}
+        viewer={session.username}
+        onLogout={handleLogout}
+      />
     </div>
   );
 }

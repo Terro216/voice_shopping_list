@@ -6,6 +6,12 @@ export type Item = {
   name: string;
   count: number;
   username: string;
+  bought: boolean;
+};
+
+export type Suggestion = {
+  name: string;
+  uses: number;
 };
 
 export const generateItemId = () =>
@@ -34,10 +40,21 @@ const sendOrQueue = async (url: string, method: string, body?: unknown): Promise
 export const fetchItems = (username: string): Promise<Item[]> =>
   request<Item[]>(`/api/items?username=${encodeURIComponent(username)}`);
 
+export const fetchSuggestions = (username: string, q = ''): Promise<Suggestion[]> =>
+  request<Suggestion[]>(
+    `/api/items/suggestions?username=${encodeURIComponent(username)}&q=${encodeURIComponent(q)}`,
+  );
+
 export const createItem = (item: Item): Promise<void> => sendOrQueue('/api/items', 'POST', item);
 
 export const changeItemCount = (id: string, username: string, delta: number): Promise<void> =>
   sendOrQueue(`/api/items/${encodeURIComponent(id)}/count`, 'PATCH', { username, delta });
+
+export const setItemBought = (id: string, username: string, bought: boolean): Promise<void> =>
+  sendOrQueue(`/api/items/${encodeURIComponent(id)}/bought`, 'PATCH', { username, bought });
+
+export const clearBoughtItems = (username: string): Promise<void> =>
+  sendOrQueue(`/api/items/bought?username=${encodeURIComponent(username)}`, 'DELETE');
 
 export const deleteItem = (id: string, username: string): Promise<void> =>
   sendOrQueue(

@@ -105,6 +105,36 @@ try {
   r = await api('/api/items/item-9/count', { method: 'PATCH', token, body: { username: user, delta: 1 } });
   check('count change on missing item → 404', r.status === 404, JSON.stringify(r));
 
+  // Bought flow
+  r = await api('/api/items', { method: 'POST', token, body: { id: 'item-4', name: 'молоко', username: user } });
+  r = await api('/api/items', { method: 'POST', token, body: { id: 'item-5', name: 'хлеб', username: user } });
+  r = await api('/api/items/item-4/bought', { method: 'PATCH', token, body: { username: user, bought: true } });
+  check('mark bought → 200', r.status === 200, JSON.stringify(r));
+
+  r = await api(`/api/items?username=${user}`, { token });
+  check('bought item sorts last', r.data?.length === 2 && r.data[1].id === 'item-4' && r.data[1].bought === true, JSON.stringify(r.data));
+
+  r = await api('/api/items/item-4/bought', { method: 'PATCH', token, body: { username: user, bought: 'yes' } });
+  check('non-boolean bought → 400', r.status === 400, JSON.stringify(r));
+
+  r = await api(`/api/items/suggestions?username=${user}&q=мол`, { token });
+  check('suggestions by prefix include молоко', r.status === 200 && r.data?.some((s) => s.name === 'молоко'), JSON.stringify(r.data));
+
+  r = await api(`/api/items/bought?username=${user}`, { method: 'DELETE', token });
+  check('clear bought → removed 1', r.status === 200 && r.data?.removed === 1, JSON.stringify(r));
+
+  r = await api(`/api/items?username=${user}`, { token });
+  check('only active item remains', r.data?.length === 1 && r.data[0].id === 'item-5', JSON.stringify(r.data));
+
+  r = await api(`/api/items/item-5?username=${user}`, { method: 'DELETE', token });
+
+  // Push (VAPID not configured in the smoke environment)
+  r = await api('/api/push/public-key');
+  check('push public key → null when unconfigured', r.status === 200 && r.data?.key === null, JSON.stringify(r));
+
+  r = await api('/api/push/subscribe', { method: 'POST', token, body: { subscription: { endpoint: 'https://x', keys: { p256dh: 'a', auth: 'b' } }, list: user } });
+  check('push subscribe unconfigured → 503', r.status === 503, JSON.stringify(r));
+
   r = await api('/api/items', { method: 'POST', token, body: { id: 'item-3', name: 'хлеб', username: user } });
   r = await api(`/api/items/item-3?username=${user}`, { method: 'DELETE', token });
   check('delete → 200', r.status === 200, JSON.stringify(r));

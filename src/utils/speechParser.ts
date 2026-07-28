@@ -3,6 +3,13 @@ export type ParsedItem = {
   count: number;
 };
 
+export type SpeechCommand =
+  | { type: 'add'; items: ParsedItem[] }
+  | { type: 'check'; queries: string[] }
+  | { type: 'remove'; queries: string[] }
+  | { type: 'clearBought' }
+  | { type: 'undo' };
+
 // Filler phrases stripped before single-word triggers so that e.g. "в список"
 // disappears as a whole instead of leaving "список" behind.
 const TRIGGER_PHRASES = [
@@ -98,4 +105,34 @@ export const parseSpeechText = (text: string): ParsedItem[] => {
     .split(SEPARATOR_RE)
     .map(parseSegment)
     .filter((item): item is ParsedItem => item !== null);
+};
+
+// Command verbs. Note the tense distinction: "купи" (imperative) adds,
+// "купил/купила" (past — "I bought it") checks off.
+const UNDO_RE = /^(отмена|отмени|отменить|верни как было|undo|cancel)[.!]?$/;
+
+const CLEAR_BOUGHT_RE = /(очисти|очистить|убери|убрать|clear)\s+(всё\s+|все\s+)?(купленн\S*|bought)/;
+
+const CHECK_RE =
+  /^(вычеркни|вычеркнуть|зачеркни|отметь|купила|купили|купил|взяла|взяли|взял|check off|check|bought|got)\s+(.+)$/;
+
+const REMOVE_RE = /^(убери|убрать|удали|удалить|выкинь|remove|delete)\s+(.+)$/;
+
+// The rest of a command utterance is parsed with the item pipeline and the
+// names become search queries ("вычеркни 2 молока и хлеб" → ["молока", "хлеб"]).
+const toQueries = (rest: string): string[] => parseSpeechText(rest).map((item) => item.name);
+
+export const parseSpeechCommand = (text: string): SpeechCommand => {
+  const cleaned = text.toLowerCase().trim();
+
+  if (UNDO_RE.test(cleaned)) return { type: 'undo' };
+  if (CLEAR_BOUGHT_RE.test(cleaned)) return { type: 'clearBought' };
+
+  const check = cleaned.match(CHECK_RE);
+  if (check) return { type: 'check', queries: toQueries(check[2]) };
+
+  const remove = cleaned.match(REMOVE_RE);
+  if (remove) return { type: 'remove', queries: toQueries(remove[2]) };
+
+  return { type: 'add', items: parseSpeechText(cleaned) };
 };

@@ -129,8 +129,46 @@
   align-items: center;
   gap: 0.5rem;
   width: 100%;
-  padding: 0.6rem 0.25rem;
+  padding: 0.35rem 0.25rem;
   border-bottom: 1px solid #eee;
+}
+
+/* Checkbox + name: one big tap target for checking things off in the store. */
+.itemMain {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-grow: 1;
+  min-width: 0;
+  text-align: left;
+  background: none !important;
+  border: none !important;
+  padding: 0.4rem 0 !important;
+  font-size: 1rem !important;
+  cursor: pointer;
+}
+
+.checkbox {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: 2px solid #bbb;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  color: #2e7d32;
+}
+
+.itemBought .checkbox {
+  border-color: #2e7d32;
+  background: #e8f5e9;
+}
+
+.itemBought .itemName {
+  text-decoration: line-through;
+  color: #999;
 }
 
 .itemName {
@@ -145,9 +183,60 @@
 }
 
 .itemCount {
-  margin-right: 0.5rem;
   color: #555;
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.boughtHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  margin-top: 1rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid #eee;
+  color: #888;
+  font-size: 0.9rem;
+}
+
+.clearBoughtButton {
+  font-size: 0.85rem !important;
+  color: #666;
+}
+
+.suggestions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  margin: -0.5rem 0 0.75rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+  scrollbar-width: none;
+}
+
+.chip {
+  flex-shrink: 0;
+  font-size: 0.85rem !important;
+  color: #444;
+  background: #f4f4f4 !important;
+  border: 1px solid #e2e2e2 !important;
+  border-radius: 50px !important;
+  padding: 0.25rem 0.7rem !important;
+  white-space: nowrap;
+}
+
+.chipLabel {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  color: #999;
+}
+
+.presence {
+  color: #888;
+  font-size: 0.9rem;
+  margin-left: 0.5rem;
 }
 
 .removeButton {

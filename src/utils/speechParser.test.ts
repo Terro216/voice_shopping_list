@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSpeechText } from './speechParser';
+import { parseSpeechText, parseSpeechCommand } from './speechParser';
 
 describe('speechParser', () => {
   it('parses simple russian sentences with "и"', () => {
@@ -61,5 +61,68 @@ describe('speechParser', () => {
 
   it('a bare number stays a name, not a count', () => {
     expect(parseSpeechText('2')).toEqual([{ name: '2', count: 1 }]);
+  });
+});
+
+describe('parseSpeechCommand', () => {
+  it('treats plain speech as add', () => {
+    expect(parseSpeechCommand('добавь молоко и хлеб')).toEqual({
+      type: 'add',
+      items: [
+        { name: 'молоко', count: 1 },
+        { name: 'хлеб', count: 1 },
+      ],
+    });
+  });
+
+  it('parses check-off commands', () => {
+    expect(parseSpeechCommand('вычеркни молоко и хлеб')).toEqual({
+      type: 'check',
+      queries: ['молоко', 'хлеб'],
+    });
+  });
+
+  it('past tense "купил" checks off, imperative "купи" adds', () => {
+    expect(parseSpeechCommand('купил молоко')).toEqual({ type: 'check', queries: ['молоко'] });
+    expect(parseSpeechCommand('купи молоко')).toEqual({
+      type: 'add',
+      items: [{ name: 'молоко', count: 1 }],
+    });
+  });
+
+  it('parses remove commands', () => {
+    expect(parseSpeechCommand('удали сыр')).toEqual({ type: 'remove', queries: ['сыр'] });
+    expect(parseSpeechCommand('remove cheese')).toEqual({ type: 'remove', queries: ['cheese'] });
+  });
+
+  it('drops counts from command queries', () => {
+    expect(parseSpeechCommand('вычеркни 2 молока')).toEqual({
+      type: 'check',
+      queries: ['молока'],
+    });
+  });
+
+  it('recognizes undo', () => {
+    expect(parseSpeechCommand('отмена')).toEqual({ type: 'undo' });
+    expect(parseSpeechCommand('Отмени!')).toEqual({ type: 'undo' });
+    expect(parseSpeechCommand('undo')).toEqual({ type: 'undo' });
+  });
+
+  it('recognizes clearing bought items', () => {
+    expect(parseSpeechCommand('очисти купленное')).toEqual({ type: 'clearBought' });
+    expect(parseSpeechCommand('убери всё купленное')).toEqual({ type: 'clearBought' });
+    expect(parseSpeechCommand('clear bought')).toEqual({ type: 'clearBought' });
+  });
+
+  it('does not mistake "убери купленное" for a remove query', () => {
+    expect(parseSpeechCommand('убери купленное').type).toBe('clearBought');
+    expect(parseSpeechCommand('убери молоко')).toEqual({ type: 'remove', queries: ['молоко'] });
+  });
+
+  it('english check-off works', () => {
+    expect(parseSpeechCommand('check off milk and bread')).toEqual({
+      type: 'check',
+      queries: ['milk', 'bread'],
+    });
   });
 });

@@ -9,6 +9,7 @@ import { config } from "./config.js";
 import { closeDb } from "./db/index.js";
 import itemsRouter from "./routes/items.js";
 import authRouter from "./routes/auth.js";
+import pushRouter from "./routes/push.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,15 +64,42 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Presence: names of everyone currently viewing a list's room. Self-reported
+// (the socket is unauthenticated) — display-only, nothing is authorized by it.
+const roomPresence = (list) => {
+  const room = io.sockets.adapter.rooms.get(`list_${list}`);
+  const users = new Set();
+  for (const socketId of room ?? []) {
+    const user = io.sockets.sockets.get(socketId)?.data?.user;
+    if (user) users.add(user);
+  }
+  return [...users];
+};
+
 io.on("connection", (socket) => {
-  socket.on("join_list", (listName) => {
-    if (typeof listName !== "string" || listName.length === 0 || listName.length > 64) return;
-    socket.join(`list_${listName}`);
+  // Payload is { list, user }; a bare string is tolerated for older cached clients.
+  socket.on("join_list", (payload) => {
+    const list = typeof payload === "string" ? payload : payload?.list;
+    const user = typeof payload === "object" && payload !== null ? payload.user : null;
+    if (typeof list !== "string" || list.length === 0 || list.length > 64) return;
+    if (user !== null && user !== undefined && (typeof user !== "string" || user.length > 64)) return;
+
+    socket.data.list = list;
+    socket.data.user = user || null;
+    socket.join(`list_${list}`);
+    io.to(`list_${list}`).emit("presence", roomPresence(list));
+  });
+
+  socket.on("disconnect", () => {
+    if (socket.data.list) {
+      io.to(`list_${socket.data.list}`).emit("presence", roomPresence(socket.data.list));
+    }
   });
 });
 
 app.use("/api/auth", authLimiter, authRouter);
 app.use("/api/items", generalLimiter, itemsRouter);
+app.use("/api/push", generalLimiter, pushRouter);
 app.use("/api", (req, res) => {
   res.status(404).json({ error: "Not found" });
 });

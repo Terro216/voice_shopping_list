@@ -8,6 +8,10 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        // Web Push handlers live in public/push-sw.js
+        importScripts: ['push-sw.js'],
+      },
       manifest: {
         name: 'Voice Shopping List',
         short_name: 'ShopList',
