@@ -1,9 +1,12 @@
 node_modules
 dist
+dev-dist
 data
 .env
 .env.*
+*.tsbuildinfo
 .git
 .gitignore
 .dockerignore
 .DS_Store
+README.md

@@ -1,19 +1,27 @@
-FROM node:20-slim
+FROM node:22-slim AS build
 
-# Install build dependencies required for native modules like better-sqlite3
-RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+# Toolchain for native modules (better-sqlite3) in case no prebuilt binary matches
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
-
-# Install dependencies, allowing fallback to npm install if package-lock is missing
-RUN npm ci || npm install
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
+RUN npm run build && npm prune --omit=dev
 
-RUN npm run build
+FROM node:22-slim
+
+ENV NODE_ENV=production
+WORKDIR /app
+
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY package.json ./
+COPY server ./server
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+CMD ["node", "server/index.js"]

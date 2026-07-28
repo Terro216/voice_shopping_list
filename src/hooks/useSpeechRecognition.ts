@@ -1,21 +1,51 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
+// lib.dom has no SpeechRecognition types; minimal structural typing of what we use.
+type SpeechRecognitionEventLike = {
+  resultIndex: number;
+  results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
+};
+
+type SpeechRecognitionErrorEventLike = { error: string };
+
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
 declare global {
   interface Window {
-    SpeechRecognition: any;
-    webkitSpeechRecognition: any;
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
   }
 }
 
-const playBeep = (frequency: number, type: OscillatorType, duration: number) => {
+const getSpeechRecognition = (): SpeechRecognitionConstructor | undefined =>
+  typeof window === 'undefined' ? undefined : window.SpeechRecognition ?? window.webkitSpeechRecognition;
+
+// Browsers cap the number of AudioContexts per page, so one shared lazy
+// instance instead of a new (never-closed) context per beep.
+let audioCtx: AudioContext | null = null;
+
+const playBeep = (frequency: number, duration: number) => {
   try {
-    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    audioCtx ??= new AudioContext();
+    if (audioCtx.state === 'suspended') void audioCtx.resume();
+
     const oscillator = audioCtx.createOscillator();
     const gainNode = audioCtx.createGain();
 
-    oscillator.type = type;
+    oscillator.type = 'sine';
     oscillator.frequency.value = frequency;
-    
+
     gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
     gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
 
@@ -25,35 +55,46 @@ const playBeep = (frequency: number, type: OscillatorType, duration: number) => 
     oscillator.start();
     oscillator.stop(audioCtx.currentTime + duration);
   } catch (e) {
-    console.error("Audio playback failed", e);
+    console.error('Audio playback failed', e);
   }
 };
 
-export const useSpeechRecognition = (onFinalText: (text: string) => void, language: string = 'ru-RU') => {
+// Errors after which the engine will not deliver results until the user acts,
+// so keeping the "listening" state would just lie to them.
+const FATAL_ERRORS = new Set(['not-allowed', 'service-not-allowed', 'audio-capture']);
+
+const RESTART_DELAY_MS = 300;
+
+export const useSpeechRecognition = (onFinalText: (text: string) => void, language: string) => {
   const [isListening, setIsListening] = useState(false);
   const [interimText, setInterimText] = useState('');
-  const [isSupported, setIsSupported] = useState(true);
+  const [isSupported] = useState(() => Boolean(getSpeechRecognition()));
 
   const isListeningRef = useRef(isListening);
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Latest-ref: handlers below always see the current callback while the
+  // recognition instance itself is only re-created on language change.
+  const onFinalTextRef = useRef(onFinalText);
+  useEffect(() => {
+    onFinalTextRef.current = onFinalText;
+  }, [onFinalText]);
 
   useEffect(() => {
     isListeningRef.current = isListening;
   }, [isListening]);
 
   useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setIsSupported(false);
-      return;
-    }
+    const SpeechRecognition = getSpeechRecognition();
+    if (!SpeechRecognition) return;
 
     const rec = new SpeechRecognition();
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = language;
 
-    rec.onresult = (event: any) => {
+    rec.onresult = (event) => {
       let interim = '';
       let final = '';
 
@@ -67,51 +108,68 @@ export const useSpeechRecognition = (onFinalText: (text: string) => void, langua
 
       setInterimText(interim);
       if (final) {
-        onFinalText(final);
+        onFinalTextRef.current(final);
         setInterimText('');
       }
     };
 
-    rec.onerror = (e: any) => {
-      console.error("Speech recognition error:", e.error);
+    rec.onerror = (event) => {
+      console.error('Speech recognition error:', event.error);
+      if (FATAL_ERRORS.has(event.error)) {
+        setIsListening(false);
+        setInterimText('');
+      }
     };
 
+    // Chrome stops continuous recognition after silence; restart while the
+    // user still wants to listen.
     rec.onend = () => {
-      if (isListeningRef.current) {
-        setTimeout(() => {
-          if (isListeningRef.current && recognitionRef.current) {
-            try {
-              recognitionRef.current.start();
-            } catch (err) {}
+      if (!isListeningRef.current) return;
+      restartTimerRef.current = setTimeout(() => {
+        if (isListeningRef.current && recognitionRef.current) {
+          try {
+            recognitionRef.current.start();
+          } catch {
+            // already started — fine
           }
-        }, 300);
-      }
+        }
+      }, RESTART_DELAY_MS);
     };
 
     recognitionRef.current = rec;
 
     return () => {
+      clearTimeout(restartTimerRef.current);
       rec.onend = null;
+      rec.onresult = null;
+      rec.onerror = null;
       try {
         rec.stop();
-      } catch (e) {}
+      } catch {
+        // never started — fine
+      }
     };
-  }, [language, onFinalText]);
+  }, [language]);
 
   const toggleListening = useCallback(() => {
-    const nextState = !isListening;
-    setIsListening(nextState);
-    if (nextState) {
-      playBeep(880, 'sine', 0.1); // High beep
-      setInterimText('');
+    const next = !isListening;
+    setIsListening(next);
+    setInterimText('');
+    if (next) {
+      playBeep(880, 0.1);
       try {
         recognitionRef.current?.start();
-      } catch (err) {}
+      } catch {
+        // already started — fine
+      }
     } else {
-      playBeep(440, 'sine', 0.2); // Low boop
+      playBeep(440, 0.2);
+      clearTimeout(restartTimerRef.current);
       try {
         recognitionRef.current?.stop();
-      } catch (err) {}
+      } catch {
+        // never started — fine
+      }
     }
   }, [isListening]);
 

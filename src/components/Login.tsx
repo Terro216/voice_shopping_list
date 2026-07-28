@@ -6,30 +6,34 @@ type Props = {
   onLogin: (username: string, token: string) => void;
 };
 
-export const Login: React.FC<Props> = ({ onLogin }) => {
-  const [inputUsername, setInputUsername] = useState('');
+export const Login = ({ onLogin }: Props) => {
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputUsername.trim() || !password.trim()) {
+    if (!username.trim() || !password) {
       setError('Please enter both username and password.');
       return;
     }
+    if (isRegistering && password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
 
+    setError('');
+    setIsSubmitting(true);
     try {
-      setError('');
-      if (isRegistering) {
-        const { token, username } = await register(inputUsername, password);
-        onLogin(username, token);
-      } else {
-        const { token, username } = await login(inputUsername, password);
-        onLogin(username, token);
-      }
-    } catch (err: any) {
-      setError(err.message);
+      const action = isRegistering ? register : login;
+      const result = await action(username.trim(), password);
+      onLogin(result.username, result.token);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -37,33 +41,38 @@ export const Login: React.FC<Props> = ({ onLogin }) => {
     <div className={styles.container}>
       <h1 className={styles.title}>Voice Shopping List</h1>
       <p>Please log in or register to manage your list.</p>
-      
-      <form className={styles.form} onSubmit={handleSubmit} style={{ flexDirection: 'column' }}>
-        <input 
-          value={inputUsername}
-          onChange={(e) => setInputUsername(e.target.value)}
+
+      <form className={styles.loginForm} onSubmit={handleSubmit}>
+        <input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
           placeholder="Username"
+          autoComplete="username"
           autoFocus
         />
-        <input 
+        <input
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="Password"
+          placeholder={isRegistering ? 'Password (min. 8 characters)' : 'Password'}
+          autoComplete={isRegistering ? 'new-password' : 'current-password'}
         />
-        <button type="submit" style={{ marginTop: '0.5rem' }}>
-          {isRegistering ? 'Register' : 'Login'}
+        <button type="submit" disabled={isSubmitting}>
+          {isSubmitting ? '…' : isRegistering ? 'Register' : 'Login'}
         </button>
       </form>
-      
-      {error && <p style={{ color: 'red', marginTop: '1rem' }}>{error}</p>}
-      
-      <p style={{ marginTop: '1rem' }}>
+
+      {error && <p className={styles.error}>{error}</p>}
+
+      <p className={styles.switchMode}>
         {isRegistering ? 'Already have an account? ' : "Don't have an account? "}
-        <button 
-          type="button" 
-          onClick={() => setIsRegistering(!isRegistering)}
-          style={{ background: 'none', border: 'none', color: 'blue', textDecoration: 'underline', cursor: 'pointer' }}
+        <button
+          type="button"
+          className={styles.linkButton}
+          onClick={() => {
+            setIsRegistering(!isRegistering);
+            setError('');
+          }}
         >
           {isRegistering ? 'Log in here' : 'Register here'}
         </button>

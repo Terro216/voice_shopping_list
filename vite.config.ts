@@ -11,32 +11,31 @@ export default defineConfig({
       manifest: {
         name: 'Voice Shopping List',
         short_name: 'ShopList',
-        theme_color: '#ffffff',
+        description: 'Shared shopping lists with voice input',
+        theme_color: '#2e7d32',
+        background_color: '#ffffff',
+        display: 'standalone',
         icons: [
           {
-            src: '/vite.svg',
-            sizes: '192x192',
-            type: 'image/svg+xml'
+            src: '/icon.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
+            purpose: 'any',
           },
-          {
-            src: '/vite.svg',
-            sizes: '512x512',
-            type: 'image/svg+xml'
-          }
-        ]
-      }
-    })
+        ],
+      },
+    }),
   ],
   server: {
     proxy: {
       '/api': {
         target: 'http://localhost:3000',
-        changeOrigin: true
+        changeOrigin: true,
       },
       '/socket.io': {
         target: 'http://localhost:3000',
-        ws: true
-      }
-    }
-  }
+        ws: true,
+      },
+    },
+  },
 })

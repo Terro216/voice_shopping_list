@@ -1,0 +1,25 @@
+import crypto from "crypto";
+
+const isProduction = process.env.NODE_ENV === "production";
+
+let jwtSecret = process.env.JWT_SECRET;
+if (!jwtSecret) {
+  if (isProduction) {
+    console.error(
+      "FATAL: JWT_SECRET is not set. Add it to .env (e.g. `openssl rand -hex 32`) and restart.",
+    );
+    process.exit(1);
+  }
+  // Dev convenience: random per-process secret, so a leaked dev token is useless
+  // elsewhere. Tokens are invalidated on every restart.
+  jwtSecret = crypto.randomBytes(32).toString("hex");
+  console.warn("JWT_SECRET is not set — generated a temporary dev secret.");
+}
+
+export const config = {
+  isProduction,
+  port: Number(process.env.PORT) || 3000,
+  jwtSecret,
+  tokenTtl: "7d",
+  bcryptRounds: 10,
+};

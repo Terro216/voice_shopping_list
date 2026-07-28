@@ -1,4 +1,3 @@
-import React from 'react';
 import styles from '../App.module.css';
 
 type Props = {
@@ -10,44 +9,45 @@ type Props = {
   interimText: string;
 };
 
-export const VoiceControls: React.FC<Props> = ({
+export const VoiceControls = ({
   isSupported,
   isListening,
   toggleListening,
   language,
   setLanguage,
-  interimText
-}) => {
+  interimText,
+}: Props) => {
   if (!isSupported) {
     return (
       <div className={styles.voiceControls}>
-        <span style={{ color: 'red' }}>⚠️ Speech Recognition not supported in this browser.</span>
+        <span className={styles.error}>⚠️ Speech recognition is not supported in this browser.</span>
       </div>
     );
   }
 
   return (
     <div className={styles.voiceControls}>
-      <button 
-        type="button" 
+      <button
+        type="button"
         className={`${styles.micButton} ${isListening ? styles.active : ''}`}
         onClick={toggleListening}
       >
         {isListening ? '🎙 Listening...' : '🎤 Start Voice'}
       </button>
-      
-      <select 
-        value={language} 
+
+      <select
+        value={language}
+        aria-label="Recognition language"
         onChange={(e) => {
           setLanguage(e.target.value);
-          if (isListening) toggleListening(); 
+          if (isListening) toggleListening(); // engine restarts with the new language off
         }}
       >
         <option value="ru-RU">Русский</option>
         <option value="en-US">English</option>
       </select>
 
-      <div className={styles.interimText}>
+      <div className={styles.interimText} aria-live="polite">
         {interimText}
       </div>
     </div>

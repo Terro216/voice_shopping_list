@@ -1,21 +1,20 @@
-export const register = async (username: string, password: string) => {
-  const res = await fetch('/api/auth/register', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to register');
-  return data;
+import { request } from './client';
+
+type AuthResponse = {
+  token: string;
+  username: string;
 };
 
-export const login = async (username: string, password: string) => {
-  const res = await fetch('/api/auth/login', {
+export const register = (username: string, password: string): Promise<AuthResponse> =>
+  request<AuthResponse>('/api/auth/register', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
+    body: { username, password },
+    auth: false,
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to login');
-  return data;
-};
+
+export const login = (username: string, password: string): Promise<AuthResponse> =>
+  request<AuthResponse>('/api/auth/login', {
+    method: 'POST',
+    body: { username, password },
+    auth: false,
+  });

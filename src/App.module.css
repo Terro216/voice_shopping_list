@@ -7,24 +7,95 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  font-family: sans-serif;
-  padding: 2rem;
+  font-family: system-ui, sans-serif;
+  padding: 1.5rem 1rem 2rem;
   max-width: 600px;
   margin: 0 auto;
 }
 
-.item {
+.container button {
+  padding: 0.4rem 0.8rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.container button:hover {
+  background: #f3f3f3;
+}
+
+.container input,
+.container select {
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+.header {
   display: flex;
   justify-content: space-between;
-  width: 100%;
-  padding: 0.75rem;
-  border-bottom: 1px solid #eee;
   align-items: center;
+  width: 100%;
+  margin-bottom: 0.5rem;
+  gap: 0.5rem;
+}
+
+.headerActions {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .title {
-  font-size: 2rem;
+  font-size: 1.75rem;
+  margin: 0;
+}
+
+.activeList {
+  align-self: flex-start;
+  margin: 0 0 1rem;
+  color: #444;
+}
+
+/* Stays pinned while the list scrolls, so the mic is always reachable. */
+.voiceControls {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   margin-bottom: 1rem;
+  width: 100%;
+  background: #f9f9f9;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.micButton {
+  border-radius: 50px !important;
+  font-weight: bold;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.micButton.active {
+  background-color: #ff4444 !important;
+  border-color: #ff4444 !important;
+  color: white;
+  animation: pulse 1.5s infinite;
+}
+
+.interimText {
+  font-style: italic;
+  color: #666;
+  min-height: 1.5em;
+  flex-grow: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .form {
@@ -36,45 +107,87 @@
 
 .form input {
   flex-grow: 1;
-  padding: 0.5rem;
+  min-width: 0;
 }
 
-.voiceControls {
+.loginForm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 320px;
+  margin-top: 1rem;
+}
+
+.list {
+  width: 100%;
+}
+
+.item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.6rem 0.25rem;
+  border-bottom: 1px solid #eee;
+}
+
+.itemName {
+  overflow-wrap: anywhere;
+}
+
+.itemControls {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  margin-bottom: 1rem;
-  width: 100%;
-  background: #f9f9f9;
-  padding: 1rem;
-  border-radius: 8px;
+  gap: 0.35rem;
+  flex-shrink: 0;
 }
 
-.micButton {
-  padding: 0.5rem 1rem;
-  border-radius: 50px;
-  border: none;
-  cursor: pointer;
-  font-weight: bold;
-  transition: all 0.2s;
-  background-color: #e0e0e0;
+.itemCount {
+  margin-right: 0.5rem;
+  color: #555;
+  font-variant-numeric: tabular-nums;
 }
 
-.micButton.active {
-  background-color: #ff4444;
-  color: white;
-  animation: pulse 1.5s infinite;
+.removeButton {
+  color: #cc0000;
 }
 
-.interimText {
+.empty {
+  color: #777;
   font-style: italic;
-  color: #666;
-  min-height: 1.5em;
-  flex-grow: 1;
+  margin-top: 1rem;
+  text-align: center;
+}
+
+.error {
+  color: #cc0000;
+  margin-top: 0.75rem;
+}
+
+.switchMode {
+  margin-top: 1rem;
+}
+
+.linkButton {
+  background: none !important;
+  border: none !important;
+  color: #0055cc;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0 !important;
+  font-size: inherit;
 }
 
 @keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7); }
-  70% { box-shadow: 0 0 0 10px rgba(255, 68, 68, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(255, 68, 68, 0); }
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(255, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 68, 68, 0);
+  }
 }
