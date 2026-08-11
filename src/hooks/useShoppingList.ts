@@ -6,12 +6,20 @@ import {
   fetchItems,
   createItem,
   changeItemCount,
+  renameItem as renameItemRequest,
   setItemBought,
   clearBoughtItems,
   deleteItem,
   generateItemId,
 } from '../api/items';
-import { syncOfflineQueue } from '../api/offlineQueue';
+import { readSnapshot, writeSnapshot } from '../api/listCache';
+import {
+  QUEUE_CHANGED_EVENT,
+  queuedMutationCount,
+  syncOfflineQueue,
+} from '../api/offlineQueue';
+import { ApiError, CLIENT_ID, getToken, notifyAuthExpired } from '../api/client';
+import { useT } from '../i18n';
 
 const MAX_COUNT = 999;
 const UNDO_STACK_LIMIT = 20;
@@ -24,19 +32,38 @@ type UndoEntry = {
 const sameList = (a: Item[], b: Item[]) =>
   a.length === b.length &&
   a.every(
-    (item, i) => item.id === b[i].id && item.count === b[i].count && item.bought === b[i].bought,
+    (item, i) =>
+      item.id === b[i].id &&
+      item.name === b[i].name &&
+      item.count === b[i].count &&
+      item.bought === b[i].bought,
   );
 
 export const useShoppingList = (username: string, viewer: string) => {
-  const [items, setItems] = useState<Item[]>([]);
+  const { t } = useT();
+  // Start from the last known contents so a shop with no signal shows the list
+  // instead of an empty screen; the network refresh replaces it when it lands.
+  const [items, setItems] = useState<Item[]>(() => readSnapshot(username)?.items ?? []);
   const [viewers, setViewers] = useState<string[]>([]);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [pendingCount, setPendingCount] = useState(queuedMutationCount);
+  const [accessDenied, setAccessDenied] = useState(false);
 
-  // Mutation callbacks read the latest items through this ref so they can stay
-  // referentially stable instead of being re-created on every list change.
+  // Mutation callbacks read the latest items through this ref, and every write
+  // goes through `applyItems` so the ref is current *synchronously* — two adds
+  // fired from one utterance both have to see the first one's result, which a
+  // ref synced in an effect could not guarantee.
   const itemsRef = useRef(items);
-  useEffect(() => {
-    itemsRef.current = items;
-  }, [items]);
+
+  const applyItems = useCallback(
+    (updater: (prev: Item[]) => Item[]) => {
+      const next = updater(itemsRef.current);
+      itemsRef.current = next;
+      setItems(next);
+      writeSnapshot(username, next);
+    },
+    [username],
+  );
 
   const undoStackRef = useRef<UndoEntry[]>([]);
   const pushUndo = (label: string, run: () => Promise<void>) => {
@@ -44,91 +71,128 @@ export const useShoppingList = (username: string, viewer: string) => {
     if (undoStackRef.current.length > UNDO_STACK_LIMIT) undoStackRef.current.shift();
   };
 
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
+
   const loadItems = useCallback(
     async (notifyOnChange = false) => {
       try {
         const data = await fetchItems(username);
-        setItems((prev) => {
-          if (notifyOnChange && !sameList(prev, data)) {
-            toast('List was updated by someone else', { icon: '🔄', id: 'remote-update' });
-          }
-          return data;
-        });
+        setAccessDenied(false);
+        if (notifyOnChange && !sameList(itemsRef.current, data)) {
+          toast(tRef.current('listUpdated'), { icon: '🔄', id: 'remote-update' });
+        }
+        applyItems(() => data);
       } catch (err) {
+        if (err instanceof ApiError && err.status === 403) {
+          setAccessDenied(true);
+          return;
+        }
+        // Anything else (offline, server hiccup) keeps whatever is on screen —
+        // the cached list is far more useful than a blank one.
         console.error('Error fetching items:', err);
       }
     },
-    [username],
+    [username, applyItems],
   );
+
+  const runSync = useCallback(async () => {
+    const result = await syncOfflineQueue();
+    setPendingCount(queuedMutationCount());
+    if (result.rejected > 0) {
+      toast.error(tRef.current('syncFailed', { count: result.rejected }));
+    }
+    if (result.sent > 0 || result.rejected > 0) await loadItems();
+  }, [loadItems]);
 
   useEffect(() => {
     loadItems();
+    if (navigator.onLine && queuedMutationCount() > 0) void runSync();
 
-    const socket = io();
+    // A callback, not a fixed object: reconnects then present whatever token is
+    // stored now, including one the server renewed since this socket was made.
+    const socket = io({ auth: (cb) => cb({ token: getToken() }) });
     let firstConnect = true;
     socket.on('connect', () => {
       // Room membership dies with the connection — re-join on every (re)connect
       // and catch up on whatever was missed while disconnected.
-      socket.emit('join_list', { list: username, user: viewer });
+      socket.emit('join_list', { list: username });
       if (firstConnect) {
         firstConnect = false;
         return;
       }
       loadItems(true);
     });
-    socket.on('list_updated', () => loadItems(true));
+    socket.on('connect_error', (err: Error) => {
+      if (err.message === 'unauthorized') notifyAuthExpired();
+    });
+    socket.on('list_updated', (payload: { actor?: string | null } | undefined) => {
+      // Our own change is already on screen optimistically; refetching it would
+      // only risk flashing the pre-update value back at the user.
+      if (payload?.actor && payload.actor === CLIENT_ID) return;
+      loadItems(true);
+    });
     socket.on('presence', (users: unknown) => {
-      setViewers(Array.isArray(users) ? users.filter((u): u is string => typeof u === 'string') : []);
+      setViewers(
+        Array.isArray(users) ? users.filter((u): u is string => typeof u === 'string') : [],
+      );
     });
 
     const handleOnline = () => {
-      toast.success('Back online! Syncing data...');
-      syncOfflineQueue().then(() => loadItems());
+      setIsOffline(false);
+      toast.success(tRef.current('backOnline'), { id: 'connectivity' });
+      void runSync().then(() => loadItems());
     };
     const handleOffline = () => {
-      toast.error('Offline mode. Changes will be saved locally.');
+      setIsOffline(true);
+      toast(tRef.current('offlineMode'), { icon: '📴', id: 'connectivity' });
     };
+    const handleQueueChange = () => setPendingCount(queuedMutationCount());
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    window.addEventListener(QUEUE_CHANGED_EVENT, handleQueueChange);
 
     return () => {
       socket.disconnect();
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener(QUEUE_CHANGED_EVENT, handleQueueChange);
     };
-  }, [loadItems, username, viewer]);
+  }, [loadItems, runSync, username]);
 
   // ---- raw operations: optimistic update + request, no undo recording ----
 
   const applyAdd = useCallback(
     async (item: Item) => {
-      setItems((prev) => [...prev, item]);
+      applyItems((prev) => [...prev, item]);
       try {
         await createItem(item);
       } catch {
-        toast.error(`Failed to add "${item.name}"`);
+        toast.error(tRef.current('addFailed', { name: item.name }));
         loadItems();
       }
     },
-    [loadItems],
+    [applyItems, loadItems],
   );
 
   const applyRemove = useCallback(
     async (id: string) => {
-      setItems((prev) => prev.filter((item) => item.id !== id));
+      applyItems((prev) => prev.filter((item) => item.id !== id));
       try {
         await deleteItem(id, username);
       } catch {
         loadItems();
       }
     },
-    [username, loadItems],
+    [username, applyItems, loadItems],
   );
 
   const applyCount = useCallback(
     async (id: string, delta: number) => {
-      setItems((prev) =>
+      applyItems((prev) =>
         prev
           .map((item) =>
             item.id === id
@@ -143,19 +207,35 @@ export const useShoppingList = (username: string, viewer: string) => {
         loadItems();
       }
     },
-    [username, loadItems],
+    [username, applyItems, loadItems],
   );
 
   const applyBought = useCallback(
     async (id: string, bought: boolean) => {
-      setItems((prev) => prev.map((item) => (item.id === id ? { ...item, bought } : item)));
+      applyItems((prev) =>
+        prev.map((item) =>
+          item.id === id ? { ...item, bought, bought_at: bought ? Date.now() : null } : item,
+        ),
+      );
       try {
         await setItemBought(id, username, bought);
       } catch {
         loadItems();
       }
     },
-    [username, loadItems],
+    [username, applyItems, loadItems],
+  );
+
+  const applyRename = useCallback(
+    async (id: string, name: string) => {
+      applyItems((prev) => prev.map((item) => (item.id === id ? { ...item, name } : item)));
+      try {
+        await renameItemRequest(id, username, name);
+      } catch {
+        loadItems();
+      }
+    },
+    [username, applyItems, loadItems],
   );
 
   // ---- public operations: record an undo entry, then apply ----
@@ -194,7 +274,14 @@ export const useShoppingList = (username: string, viewer: string) => {
         return changeCount(existing.id, count);
       }
 
-      const newItem: Item = { id: generateItemId(), name: trimmed, count, username, bought: false };
+      const newItem: Item = {
+        id: generateItemId(),
+        name: trimmed,
+        count,
+        username,
+        bought: false,
+        bought_at: null,
+      };
       pushUndo(trimmed, () => applyRemove(newItem.id));
       await applyAdd(newItem);
     },
@@ -210,6 +297,18 @@ export const useShoppingList = (username: string, viewer: string) => {
       await applyRemove(id);
     },
     [applyAdd, applyRemove],
+  );
+
+  const renameItem = useCallback(
+    async (id: string, name: string) => {
+      const trimmed = name.trim();
+      const item = itemsRef.current.find((i) => i.id === id);
+      if (!item || !trimmed || trimmed === item.name) return;
+      const previous = item.name;
+      pushUndo(previous, () => applyRename(id, previous));
+      await applyRename(id, trimmed);
+    },
+    [applyRename],
   );
 
   const setBought = useCallback(
@@ -234,19 +333,19 @@ export const useShoppingList = (username: string, viewer: string) => {
     const boughtItems = itemsRef.current.filter((item) => item.bought).map((item) => ({ ...item }));
     if (boughtItems.length === 0) return;
 
-    pushUndo(`bought items (${boughtItems.length})`, async () => {
+    pushUndo(`${tRef.current('bought')} (${boughtItems.length})`, async () => {
       for (const item of boughtItems) {
         await applyAdd(item);
       }
     });
 
-    setItems((prev) => prev.filter((item) => !item.bought));
+    applyItems((prev) => prev.filter((item) => !item.bought));
     try {
       await clearBoughtItems(username);
     } catch {
       loadItems();
     }
-  }, [username, applyAdd, loadItems]);
+  }, [username, applyAdd, applyItems, loadItems]);
 
   /** Reverts the most recent action; returns its label, or null if nothing to undo. */
   const undo = useCallback(async () => {
@@ -261,8 +360,12 @@ export const useShoppingList = (username: string, viewer: string) => {
   return {
     items,
     otherViewers,
+    isOffline,
+    pendingCount,
+    accessDenied,
     addItem,
     removeItem,
+    renameItem,
     changeCount,
     setBought,
     toggleBought,

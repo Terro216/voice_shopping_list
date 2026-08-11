@@ -4,11 +4,14 @@ import { fileURLToPath } from "url";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import helmet from "helmet";
-import rateLimit from "express-rate-limit";
+import jwt from "jsonwebtoken";
 import { config } from "./config.js";
 import { closeDb } from "./db/index.js";
+import { hasListAccess } from "./lists.js";
+import { authLimiter } from "./middleware/rateLimits.js";
 import itemsRouter from "./routes/items.js";
 import authRouter from "./routes/auth.js";
+import listsRouter from "./routes/lists.js";
 import pushRouter from "./routes/push.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -50,22 +53,21 @@ app.use(
 );
 app.use(express.json({ limit: "10kb" }));
 
-const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 200,
-  standardHeaders: true,
-  legacyHeaders: false,
+// Sockets carry the same JWT as the REST calls: the name shown in presence and
+// the rooms a client may join both come from the token, not from what the
+// client claims about itself.
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (typeof token !== "string" || !token) return next(new Error("unauthorized"));
+  try {
+    socket.data.user = jwt.verify(token, config.jwtSecret).username;
+    next();
+  } catch {
+    next(new Error("unauthorized"));
+  }
 });
 
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 50,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// Presence: names of everyone currently viewing a list's room. Self-reported
-// (the socket is unauthenticated) — display-only, nothing is authorized by it.
+/** Names of everyone currently viewing a list's room. */
 const roomPresence = (list) => {
   const room = io.sockets.adapter.rooms.get(`list_${list}`);
   const users = new Set();
@@ -76,30 +78,37 @@ const roomPresence = (list) => {
   return [...users];
 };
 
+const announcePresence = (list) => {
+  if (list) io.to(`list_${list}`).emit("presence", roomPresence(list));
+};
+
 io.on("connection", (socket) => {
-  // Payload is { list, user }; a bare string is tolerated for older cached clients.
   socket.on("join_list", (payload) => {
     const list = typeof payload === "string" ? payload : payload?.list;
-    const user = typeof payload === "object" && payload !== null ? payload.user : null;
     if (typeof list !== "string" || list.length === 0 || list.length > 64) return;
-    if (user !== null && user !== undefined && (typeof user !== "string" || user.length > 64)) return;
+    if (!hasListAccess(socket.data.user, list)) return;
+
+    // Switching lists must vacate the old room, otherwise the previous list
+    // keeps showing this viewer until the connection itself drops.
+    const previous = socket.data.list;
+    if (previous === list) return;
+    if (previous) socket.leave(`list_${previous}`);
 
     socket.data.list = list;
-    socket.data.user = user || null;
     socket.join(`list_${list}`);
-    io.to(`list_${list}`).emit("presence", roomPresence(list));
+    announcePresence(previous);
+    announcePresence(list);
   });
 
-  socket.on("disconnect", () => {
-    if (socket.data.list) {
-      io.to(`list_${socket.data.list}`).emit("presence", roomPresence(socket.data.list));
-    }
-  });
+  socket.on("disconnect", () => announcePresence(socket.data.list));
 });
 
+// Only the unauthenticated auth endpoints are limited by IP; everything behind
+// a token is limited per account inside its own router (see rateLimits.js).
 app.use("/api/auth", authLimiter, authRouter);
-app.use("/api/items", generalLimiter, itemsRouter);
-app.use("/api/push", generalLimiter, pushRouter);
+app.use("/api/items", itemsRouter);
+app.use("/api/lists", listsRouter);
+app.use("/api/push", pushRouter);
 app.use("/api", (req, res) => {
   res.status(404).json({ error: "Not found" });
 });

@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
+import { useT } from '../i18n';
+import styles from '../App.module.css';
 import {
   getPushPublicKey,
   getPushStatus,
@@ -23,6 +25,7 @@ const pushSupported = () =>
  * service worker in dev, VAPID not configured on the server).
  */
 export const PushToggle = ({ list }: Props) => {
+  const { t } = useT();
   const [state, setState] = useState<State>('hidden');
   const publicKeyRef = useRef<string | null>(null);
 
@@ -57,7 +60,7 @@ export const PushToggle = ({ list }: Props) => {
     try {
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') {
-        toast.error('Notifications are blocked in the browser');
+        toast.error(t('notificationsBlocked'));
         setState('off');
         return;
       }
@@ -72,9 +75,9 @@ export const PushToggle = ({ list }: Props) => {
 
       await savePushSubscription(subscription.toJSON(), list);
       setState('on');
-      toast.success(`Notifications on for "${list}"`);
+      toast.success(t('notificationsOn', { list }));
     } catch {
-      toast.error('Could not enable notifications');
+      toast.error(t('notificationsFailed'));
       setState('off');
     }
   };
@@ -89,7 +92,7 @@ export const PushToggle = ({ list }: Props) => {
         await subscription.unsubscribe();
       }
       setState('off');
-      toast('Notifications off', { icon: '🔕' });
+      toast(t('notificationsOff'), { icon: '🔕' });
     } catch {
       setState('on');
     }
@@ -100,10 +103,12 @@ export const PushToggle = ({ list }: Props) => {
   return (
     <button
       type="button"
+      className={styles.iconButton}
       onClick={state === 'on' ? disable : enable}
       disabled={state === 'busy'}
-      title={state === 'on' ? 'Disable notifications for this list' : 'Notify me about this list'}
-      aria-label="Toggle push notifications"
+      title={t('notifications')}
+      aria-label={t('notifications')}
+      aria-pressed={state === 'on'}
     >
       {state === 'on' ? '🔔' : '🔕'}
     </button>

@@ -3,12 +3,14 @@ import db from "../db/index.js";
 import { config } from "../config.js";
 import { pushEnabled } from "../push.js";
 import { verifyToken } from "../middleware/auth.js";
+import { readLimiter, writeLimiter } from "../middleware/rateLimits.js";
+import { hasListAccess } from "../lists.js";
 import { isPlausibleUsername } from "../validation.js";
 
 const router = express.Router();
 
 // Public by nature — the browser needs it before any subscription exists.
-router.get("/public-key", (req, res) => {
+router.get("/public-key", readLimiter, (req, res) => {
   res.json({ key: pushEnabled ? config.vapidPublicKey : null });
 });
 
@@ -22,12 +24,15 @@ const isValidSubscription = (sub) =>
 
 // A device subscribes to exactly one list (endpoint is the primary key), so
 // subscribing from another list simply re-points the device.
-router.post("/subscribe", verifyToken, (req, res) => {
+router.post("/subscribe", verifyToken, writeLimiter, (req, res) => {
   if (!pushEnabled) return res.status(503).json({ error: "Push is not configured" });
 
   const { subscription, list } = req.body;
   if (!isValidSubscription(subscription) || !isPlausibleUsername(list)) {
     return res.status(400).json({ error: "Invalid subscription" });
+  }
+  if (!hasListAccess(req.user.username, list)) {
+    return res.status(403).json({ error: "No access to this list" });
   }
 
   db.prepare(
@@ -49,7 +54,7 @@ router.post("/subscribe", verifyToken, (req, res) => {
   res.status(201).json({ success: true });
 });
 
-router.delete("/subscribe", verifyToken, (req, res) => {
+router.delete("/subscribe", verifyToken, writeLimiter, (req, res) => {
   const { endpoint } = req.body;
   if (typeof endpoint !== "string") return res.status(400).json({ error: "Invalid endpoint" });
 
@@ -61,7 +66,7 @@ router.delete("/subscribe", verifyToken, (req, res) => {
 });
 
 // Which list is this device subscribed to (if any)?
-router.get("/status", verifyToken, (req, res) => {
+router.get("/status", verifyToken, readLimiter, (req, res) => {
   const { endpoint } = req.query;
   if (typeof endpoint !== "string") return res.status(400).json({ error: "Invalid endpoint" });
 

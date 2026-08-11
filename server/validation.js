@@ -27,3 +27,11 @@ export const normalizeItemName = (name) => {
 
 export const isValidCount = (count) =>
   Number.isInteger(count) && count >= 1 && count <= MAX_COUNT;
+
+// Invite tokens are 18 random bytes in base64url.
+export const isValidShareToken = (token) =>
+  typeof token === "string" && /^[A-Za-z0-9_-]{16,64}$/.test(token);
+
+// Suggestion history is keyed on this: lowercase, single spaces, and ё folded
+// into е so «ёлка» and «елка» stay one entry instead of two rival suggestions.
+export const historyKey = (name) => name.toLowerCase().replace(/ё/g, "е");

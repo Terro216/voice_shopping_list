@@ -1,4 +1,4 @@
-import { request, ApiError } from './client';
+import { request, ApiError, NetworkError } from './client';
 import { enqueueMutation } from './offlineQueue';
 
 export type Item = {
@@ -7,6 +7,7 @@ export type Item = {
   count: number;
   username: string;
   bought: boolean;
+  bought_at?: number | null;
 };
 
 export type Suggestion = {
@@ -33,7 +34,11 @@ const sendOrQueue = async (url: string, method: string, body?: unknown): Promise
     await request(url, { method, body });
   } catch (err) {
     if (err instanceof ApiError) throw err;
-    enqueueMutation({ url, method, body });
+    if (err instanceof NetworkError) {
+      enqueueMutation({ url, method, body });
+      return;
+    }
+    throw err;
   }
 };
 
@@ -49,6 +54,9 @@ export const createItem = (item: Item): Promise<void> => sendOrQueue('/api/items
 
 export const changeItemCount = (id: string, username: string, delta: number): Promise<void> =>
   sendOrQueue(`/api/items/${encodeURIComponent(id)}/count`, 'PATCH', { username, delta });
+
+export const renameItem = (id: string, username: string, name: string): Promise<void> =>
+  sendOrQueue(`/api/items/${encodeURIComponent(id)}`, 'PATCH', { username, name });
 
 export const setItemBought = (id: string, username: string, bought: boolean): Promise<void> =>
   sendOrQueue(`/api/items/${encodeURIComponent(id)}/bought`, 'PATCH', { username, bought });

@@ -1,36 +1,48 @@
 .appWrapper {
   width: 100%;
-  height: 100%;
+  min-height: 100%;
 }
 
 .container {
   display: flex;
   flex-direction: column;
   align-items: center;
-  font-family: system-ui, sans-serif;
-  padding: 1.5rem 1rem 2rem;
-  max-width: 600px;
+  padding: 1.25rem 1rem calc(2rem + env(safe-area-inset-bottom));
+  max-width: 640px;
   margin: 0 auto;
+  color: var(--text);
 }
 
+/* Every control is at least a comfortable thumb wide: this list gets operated
+   one-handed, walking, with the other hand holding a basket. */
 .container button {
-  padding: 0.4rem 0.8rem;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  background: #fff;
+  min-height: 44px;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
   cursor: pointer;
   font-size: 0.95rem;
 }
 
-.container button:hover {
-  background: #f3f3f3;
+.container button:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.container button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .container input,
 .container select {
-  padding: 0.5rem;
-  border: 1px solid #ccc;
-  border-radius: 6px;
+  min-height: 44px;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
   font-size: 1rem;
 }
 
@@ -45,18 +57,59 @@
 
 .headerActions {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.35rem;
+}
+
+.iconButton {
+  min-width: 44px;
+  padding: 0.5rem !important;
+  font-size: 1.05rem;
+  line-height: 1;
 }
 
 .title {
-  font-size: 1.75rem;
+  font-size: 1.6rem;
   margin: 0;
 }
 
+.listBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  width: 100%;
+  margin-bottom: 0.75rem;
+  color: var(--text-soft);
+}
+
+.listPicker {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+
 .activeList {
-  align-self: flex-start;
-  margin: 0 0 1rem;
-  color: #444;
+  font-size: 0.95rem;
+}
+
+.presence {
+  color: var(--text-faint);
+  font-size: 0.85rem;
+}
+
+.offlineBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  width: 100%;
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  color: var(--text-soft);
+  font-size: 0.85rem;
 }
 
 /* Stays pinned while the list scrolls, so the mic is always reachable. */
@@ -66,32 +119,33 @@
   z-index: 10;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.6rem;
   margin-bottom: 1rem;
   width: 100%;
-  background: #f9f9f9;
-  padding: 0.75rem 1rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px var(--shadow);
 }
 
 .micButton {
   border-radius: 50px !important;
-  font-weight: bold;
-  transition: all 0.2s;
+  font-weight: 600;
+  transition: background-color 0.2s;
   white-space: nowrap;
 }
 
 .micButton.active {
-  background-color: #ff4444 !important;
-  border-color: #ff4444 !important;
-  color: white;
+  background-color: var(--danger) !important;
+  border-color: var(--danger) !important;
+  color: var(--accent-contrast);
   animation: pulse 1.5s infinite;
 }
 
 .interimText {
   font-style: italic;
-  color: #666;
+  color: var(--text-faint);
   min-height: 1.5em;
   flex-grow: 1;
   overflow: hidden;
@@ -124,13 +178,17 @@
 }
 
 .item {
+  width: 100%;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.itemRow {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 0.5rem;
   width: 100%;
-  padding: 0.35rem 0.25rem;
-  border-bottom: 1px solid #eee;
+  padding: 0.15rem 0;
 }
 
 /* Checkbox + name: one big tap target for checking things off in the store. */
@@ -143,32 +201,32 @@
   text-align: left;
   background: none !important;
   border: none !important;
-  padding: 0.4rem 0 !important;
+  padding: 0.5rem 0 !important;
   font-size: 1rem !important;
   cursor: pointer;
 }
 
 .checkbox {
   flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  border: 2px solid #bbb;
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border);
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 0.85rem;
-  color: #2e7d32;
+  color: var(--accent);
 }
 
 .itemBought .checkbox {
-  border-color: #2e7d32;
-  background: #e8f5e9;
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .itemBought .itemName {
   text-decoration: line-through;
-  color: #999;
+  color: var(--text-faint);
 }
 
 .itemName {
@@ -178,12 +236,31 @@
 .itemControls {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.3rem;
   flex-shrink: 0;
 }
 
+.stepButton {
+  min-width: 44px;
+  padding: 0.5rem !important;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.itemEditor {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0 0 0.6rem;
+  width: 100%;
+}
+
+.itemEditor input {
+  flex-grow: 1;
+  min-width: 0;
+}
+
 .itemCount {
-  color: #555;
+  color: var(--text-soft);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
@@ -195,14 +272,14 @@
   width: 100%;
   margin-top: 1rem;
   padding-bottom: 0.25rem;
-  border-bottom: 1px solid #eee;
-  color: #888;
+  border-bottom: 1px solid var(--hairline);
+  color: var(--text-faint);
   font-size: 0.9rem;
 }
 
 .clearBoughtButton {
   font-size: 0.85rem !important;
-  color: #666;
+  color: var(--text-soft) !important;
 }
 
 .suggestions {
@@ -218,40 +295,41 @@
 
 .chip {
   flex-shrink: 0;
+  min-height: 38px !important;
   font-size: 0.85rem !important;
-  color: #444;
-  background: #f4f4f4 !important;
-  border: 1px solid #e2e2e2 !important;
+  color: var(--text-soft) !important;
+  background: var(--surface-muted) !important;
+  border: 1px solid var(--border) !important;
   border-radius: 50px !important;
-  padding: 0.25rem 0.7rem !important;
+  padding: 0.25rem 0.8rem !important;
   white-space: nowrap;
 }
 
 .chipLabel {
   flex-shrink: 0;
   font-size: 0.8rem;
-  color: #999;
-}
-
-.presence {
-  color: #888;
-  font-size: 0.9rem;
-  margin-left: 0.5rem;
+  color: var(--text-faint);
 }
 
 .removeButton {
-  color: #cc0000;
+  color: var(--danger) !important;
+}
+
+.dangerButton {
+  color: var(--danger) !important;
+  border-color: var(--danger) !important;
+  background: var(--danger-soft) !important;
 }
 
 .empty {
-  color: #777;
+  color: var(--text-faint);
   font-style: italic;
   margin-top: 1rem;
   text-align: center;
 }
 
 .error {
-  color: #cc0000;
+  color: var(--danger);
   margin-top: 0.75rem;
 }
 
@@ -260,23 +338,168 @@
 }
 
 .linkButton {
+  min-height: 0 !important;
   background: none !important;
   border: none !important;
-  color: #0055cc;
+  color: var(--accent);
   text-decoration: underline;
   cursor: pointer;
   padding: 0 !important;
   font-size: inherit;
 }
 
+.toastWithAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.toastWithAction button {
+  min-height: 36px;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.sheetBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 1rem;
+}
+
+.sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 460px;
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1rem 1.1rem calc(1.1rem + env(safe-area-inset-bottom));
+  box-shadow: 0 8px 30px var(--shadow);
+}
+
+.sheet button {
+  min-height: 44px;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.sheet button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sheet input,
+.sheet select {
+  min-height: 44px;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.sheetHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sheetTitle {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.sheetSubtitle {
+  margin: 0.5rem 0 0;
+  font-size: 0.95rem;
+  color: var(--text-soft);
+}
+
+.sheetHint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-faint);
+}
+
+.sheetActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.sheetForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.sheetForm input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.settingRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.95rem;
+}
+
+.linkField {
+  width: 100%;
+  font-size: 0.85rem !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.memberList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.memberList li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--hairline);
+  padding-bottom: 0.4rem;
+}
+
 @keyframes pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7);
+    box-shadow: 0 0 0 0 rgba(192, 43, 32, 0.7);
   }
   70% {
-    box-shadow: 0 0 0 10px rgba(255, 68, 68, 0);
+    box-shadow: 0 0 0 10px rgba(192, 43, 32, 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(255, 68, 68, 0);
+    box-shadow: 0 0 0 0 rgba(192, 43, 32, 0);
   }
 }

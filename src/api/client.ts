@@ -8,17 +8,55 @@ export class ApiError extends Error {
   }
 }
 
+/** Thrown when the request never reached the server (offline, DNS, timeout). */
+export class NetworkError extends Error {
+  constructor(readonly cause?: unknown) {
+    super('Network request failed');
+    this.name = 'NetworkError';
+  }
+}
+
 // Fired when the server rejects our stored token; App listens and logs out.
 export const AUTH_EXPIRED_EVENT = 'auth-expired';
 
 export const getToken = () => localStorage.getItem('token');
 
+/**
+ * Identifies this browser tab. The server echoes it back on `list_updated` so
+ * the tab that made a change can skip refetching its own echo — otherwise every
+ * tap round-trips into a full list reload and can briefly flash the old value.
+ */
+export const CLIENT_ID = (() => {
+  const stored = sessionStorage.getItem('client_id');
+  if (stored) return stored;
+  const id =
+    typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  sessionStorage.setItem('client_id', id);
+  return id;
+})();
+
 export const authHeaders = (): Record<string, string> => {
   const token = getToken();
   return {
     'Content-Type': 'application/json',
+    'X-Client-Id': CLIENT_ID,
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
+};
+
+/**
+ * The server hands back a refreshed token as the session nears its expiry;
+ * storing it here is what keeps a daily user from being logged out mid-trip.
+ */
+export const adoptRenewedToken = (res: Response) => {
+  const renewed = res.headers.get('X-Renewed-Token');
+  if (renewed) localStorage.setItem('token', renewed);
+};
+
+export const notifyAuthExpired = () => {
+  if (getToken()) window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
 };
 
 type RequestOptions = {
@@ -31,18 +69,23 @@ type RequestOptions = {
 export const request = async <T>(url: string, options: RequestOptions = {}): Promise<T> => {
   const { method = 'GET', body, auth = true } = options;
 
-  const res = await fetch(url, {
-    method,
-    headers: auth ? authHeaders() : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: auth ? authHeaders() : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (err) {
+    throw new NetworkError(err);
+  }
+
+  if (auth) adoptRenewedToken(res);
 
   const data = await res.json().catch(() => null);
 
   if (!res.ok) {
-    if (auth && res.status === 401 && getToken()) {
-      window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
-    }
+    if (auth && res.status === 401) notifyAuthExpired();
     const message =
       data && typeof data.error === 'string' ? data.error : `Request failed (${res.status})`;
     throw new ApiError(res.status, message);

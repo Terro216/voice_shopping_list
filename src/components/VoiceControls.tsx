@@ -1,11 +1,12 @@
+import { LANGUAGES, useT, type Lang } from '../i18n';
 import styles from '../App.module.css';
 
 type Props = {
   isSupported: boolean;
   isListening: boolean;
   toggleListening: () => void;
-  language: string;
-  setLanguage: (lang: string) => void;
+  lang: Lang;
+  setLang: (lang: Lang) => void;
   interimText: string;
 };
 
@@ -13,14 +14,16 @@ export const VoiceControls = ({
   isSupported,
   isListening,
   toggleListening,
-  language,
-  setLanguage,
+  lang,
+  setLang,
   interimText,
 }: Props) => {
+  const { t } = useT();
+
   if (!isSupported) {
     return (
       <div className={styles.voiceControls}>
-        <span className={styles.error}>⚠️ Speech recognition is not supported in this browser.</span>
+        <span className={styles.error}>{t('voiceUnsupported')}</span>
       </div>
     );
   }
@@ -32,19 +35,22 @@ export const VoiceControls = ({
         className={`${styles.micButton} ${isListening ? styles.active : ''}`}
         onClick={toggleListening}
       >
-        {isListening ? '🎙 Listening...' : '🎤 Start Voice'}
+        {isListening ? t('listening') : t('startVoice')}
       </button>
 
       <select
-        value={language}
-        aria-label="Recognition language"
+        value={lang}
+        aria-label={t('recognitionLanguage')}
         onChange={(e) => {
-          setLanguage(e.target.value);
+          setLang(e.target.value as Lang);
           if (isListening) toggleListening(); // engine restarts with the new language off
         }}
       >
-        <option value="ru-RU">Русский</option>
-        <option value="en-US">English</option>
+        {LANGUAGES.map((option) => (
+          <option key={option.lang} value={option.lang}>
+            {option.label}
+          </option>
+        ))}
       </select>
 
       <div className={styles.interimText} aria-live="polite">

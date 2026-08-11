@@ -20,7 +20,10 @@ export const config = {
   isProduction,
   port: Number(process.env.PORT) || 3000,
   jwtSecret,
-  tokenTtl: "7d",
+  tokenTtl: "30d",
+  // A token seen with less than this much life left is reissued on the way out,
+  // so an app that gets opened at all never expires under the user.
+  tokenRenewBeforeSeconds: 20 * 24 * 60 * 60,
   bcryptRounds: 10,
   // Web Push is optional: without keys the feature is simply disabled.
   vapidPublicKey: process.env.VAPID_PUBLIC_KEY || null,

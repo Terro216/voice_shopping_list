@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "backup": "node scripts/backup.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

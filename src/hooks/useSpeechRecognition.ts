@@ -65,7 +65,11 @@ const FATAL_ERRORS = new Set(['not-allowed', 'service-not-allowed', 'audio-captu
 
 const RESTART_DELAY_MS = 300;
 
-export const useSpeechRecognition = (onFinalText: (text: string) => void, language: string) => {
+export const useSpeechRecognition = (
+  onFinalText: (text: string) => void,
+  language: string,
+  onFatalError?: (error: string) => void,
+) => {
   const [isListening, setIsListening] = useState(false);
   const [interimText, setInterimText] = useState('');
   const [isSupported] = useState(() => Boolean(getSpeechRecognition()));
@@ -80,6 +84,11 @@ export const useSpeechRecognition = (onFinalText: (text: string) => void, langua
   useEffect(() => {
     onFinalTextRef.current = onFinalText;
   }, [onFinalText]);
+
+  const onFatalErrorRef = useRef(onFatalError);
+  useEffect(() => {
+    onFatalErrorRef.current = onFatalError;
+  }, [onFatalError]);
 
   useEffect(() => {
     isListeningRef.current = isListening;
@@ -118,6 +127,8 @@ export const useSpeechRecognition = (onFinalText: (text: string) => void, langua
       if (FATAL_ERRORS.has(event.error)) {
         setIsListening(false);
         setInterimText('');
+        // The mic button silently going quiet looks like a broken app; say why.
+        onFatalErrorRef.current?.(event.error);
       }
     };
 

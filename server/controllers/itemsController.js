@@ -1,28 +1,34 @@
 import db from "../db/index.js";
 import { scheduleListPush } from "../push.js";
-import {
-  isPlausibleUsername,
-  isValidItemId,
-  isValidCount,
-  normalizeItemName,
-  MAX_COUNT,
-} from "../validation.js";
+import { isValidItemId, isValidCount, normalizeItemName, historyKey, MAX_COUNT } from "../validation.js";
 
-// Access model (by design): a list is identified by its owner's username, and
-// any authenticated user who knows the name can read and edit it — that is what
-// the "Share list" link relies on. The token proves who acts, `username` in the
-// request names the list acted upon.
+// Access model: a list is identified by its owner's username, and reading or
+// writing it requires being the owner or an invited member. `requireListAccess`
+// enforces that before any handler here runs and puts the list in `req.list`.
 
-const notifyList = (req, username, pushLabel) => {
-  req.app.get("io").to(`list_${username}`).emit("list_updated");
-  if (pushLabel) scheduleListPush(username, req.user.username, pushLabel);
+// Broadcasts to everyone viewing the list. The originating tab identifies
+// itself with X-Client-Id so it can ignore the echo of its own change instead
+// of refetching (and briefly flickering back to the pre-optimistic value).
+const notifyList = (req, pushLabel) => {
+  req.app.get("io").to(`list_${req.list}`).emit("list_updated", { actor: req.get("X-Client-Id") || null });
+  if (pushLabel) scheduleListPush(req.list, req.user.username, pushLabel);
 };
 
 const toItemJson = (row) => ({ ...row, bought: Boolean(row.bought) });
 
+// Active items keep insertion order; bought ones surface most-recently-checked
+// first, so "what did I just tick off" is always at the top of that group.
+const ITEM_COLUMNS = "id, name, count, username, bought, bought_at";
+const ITEM_ORDER =
+  "ORDER BY bought, CASE WHEN bought = 1 THEN -COALESCE(bought_at, 0) ELSE rowid END";
+
+// Beyond this many remembered names per list, the rarest are dropped: the
+// suggestion row only ever shows a handful, and typos would accumulate forever.
+const HISTORY_LIMIT = 400;
+
 // Frequency history behind autocomplete/"frequent" chips. Never worth failing
 // the actual mutation over.
-const recordHistory = (username, name) => {
+const recordHistory = (list, name) => {
   try {
     db.prepare(
       `INSERT INTO history (username, name, name_lower, uses, last_used) VALUES (?, ?, ?, 1, ?)
@@ -30,53 +36,53 @@ const recordHistory = (username, name) => {
          uses = uses + 1,
          last_used = excluded.last_used,
          name = excluded.name`,
-    ).run(username, name, name.toLowerCase(), Date.now());
+    ).run(list, name, historyKey(name), Date.now());
+
+    const { total } = db
+      .prepare("SELECT COUNT(*) AS total FROM history WHERE username = ?")
+      .get(list);
+    if (total > HISTORY_LIMIT) {
+      db.prepare(
+        `DELETE FROM history WHERE id IN (
+           SELECT id FROM history WHERE username = ?
+           ORDER BY uses ASC, last_used ASC LIMIT ?
+         )`,
+      ).run(list, total - HISTORY_LIMIT);
+    }
   } catch (err) {
     console.error("history record failed:", err.message);
   }
 };
 
 export const getItems = (req, res) => {
-  const { username } = req.query;
-  if (!isPlausibleUsername(username)) {
-    return res.status(400).json({ error: "username is required" });
-  }
-
   const rows = db
-    .prepare(
-      "SELECT id, name, count, username, bought FROM items WHERE username = ? ORDER BY bought, rowid",
-    )
-    .all(username);
+    .prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE username = ? ${ITEM_ORDER}`)
+    .all(req.list);
   res.json(rows.map(toItemJson));
 };
 
 export const getSuggestions = (req, res) => {
-  const { username } = req.query;
-  if (!isPlausibleUsername(username)) {
-    return res.status(400).json({ error: "username is required" });
-  }
-
-  const q = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase().slice(0, 100) : "";
+  const q = typeof req.query.q === "string" ? historyKey(req.query.q.trim()).slice(0, 100) : "";
   const rows = q
     ? db
         .prepare(
           `SELECT name, uses FROM history WHERE username = ? AND name_lower LIKE ? ESCAPE '\\'
            ORDER BY uses DESC, last_used DESC LIMIT 8`,
         )
-        .all(username, q.replace(/[\\%_]/g, "\\$&") + "%")
+        .all(req.list, q.replace(/[\\%_]/g, "\\$&") + "%")
     : db
         .prepare(
           "SELECT name, uses FROM history WHERE username = ? ORDER BY uses DESC, last_used DESC LIMIT 12",
         )
-        .all(username);
+        .all(req.list);
   res.json(rows);
 };
 
 export const addItem = (req, res) => {
-  const { id, count, username, bought } = req.body;
+  const { id, count, bought } = req.body;
   const name = normalizeItemName(req.body.name);
 
-  if (!isValidItemId(id) || !name || !isPlausibleUsername(username)) {
+  if (!isValidItemId(id) || !name) {
     return res.status(400).json({ error: "Invalid item fields" });
   }
   if (count !== undefined && !isValidCount(count)) {
@@ -88,8 +94,8 @@ export const addItem = (req, res) => {
 
   try {
     db.prepare(
-      "INSERT INTO items (id, name, count, username, bought) VALUES (?, ?, ?, ?, ?)",
-    ).run(id, name, count ?? 1, username, bought ? 1 : 0);
+      "INSERT INTO items (id, name, count, username, bought, bought_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(id, name, count ?? 1, req.list, bought ? 1 : 0, bought ? Date.now() : null);
   } catch (err) {
     if (err.code === "SQLITE_CONSTRAINT_PRIMARYKEY") {
       // Offline queue replay can resend the same client-generated id — treat as done.
@@ -98,8 +104,8 @@ export const addItem = (req, res) => {
     throw err;
   }
 
-  recordHistory(username, name);
-  notifyList(req, username, `+ ${name}${(count ?? 1) > 1 ? ` ×${count}` : ""}`);
+  recordHistory(req.list, name);
+  notifyList(req, `+ ${name}${(count ?? 1) > 1 ? ` ×${count}` : ""}`);
   res.status(201).json({ success: true });
 };
 
@@ -107,9 +113,9 @@ export const addItem = (req, res) => {
 // MAX_COUNT), negative decrements; a count dropping to zero deletes the row.
 export const changeItemCount = (req, res) => {
   const { id } = req.params;
-  const { username, delta } = req.body;
+  const { delta } = req.body;
 
-  if (!isValidItemId(id) || !isPlausibleUsername(username)) {
+  if (!isValidItemId(id)) {
     return res.status(400).json({ error: "Invalid fields" });
   }
   if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > MAX_COUNT) {
@@ -119,15 +125,15 @@ export const changeItemCount = (req, res) => {
   const apply = db.transaction(() => {
     const item = db
       .prepare("SELECT name, count FROM items WHERE id = ? AND username = ?")
-      .get(id, username);
+      .get(id, req.list);
     if (!item) return null;
 
     const next = Math.min(MAX_COUNT, item.count + delta);
     if (next <= 0) {
-      db.prepare("DELETE FROM items WHERE id = ? AND username = ?").run(id, username);
+      db.prepare("DELETE FROM items WHERE id = ? AND username = ?").run(id, req.list);
       return { label: `− ${item.name}` };
     }
-    db.prepare("UPDATE items SET count = ? WHERE id = ? AND username = ?").run(next, id, username);
+    db.prepare("UPDATE items SET count = ? WHERE id = ? AND username = ?").run(next, id, req.list);
     return { label: `${item.name} ×${next}` };
   });
 
@@ -136,58 +142,72 @@ export const changeItemCount = (req, res) => {
     return res.status(404).json({ error: "Item not found" });
   }
 
-  notifyList(req, username, result.label);
+  notifyList(req, result.label);
+  res.json({ success: true });
+};
+
+// Fixing what dictation misheard ("малако жирное") without deleting and
+// re-adding the row, which would lose its place and its count.
+export const renameItem = (req, res) => {
+  const { id } = req.params;
+  const name = normalizeItemName(req.body.name);
+
+  if (!isValidItemId(id) || !name) {
+    return res.status(400).json({ error: "Invalid fields" });
+  }
+
+  const { changes } = db
+    .prepare("UPDATE items SET name = ? WHERE id = ? AND username = ?")
+    .run(name, id, req.list);
+  if (changes === 0) return res.status(404).json({ error: "Item not found" });
+
+  recordHistory(req.list, name);
+  notifyList(req, `✎ ${name}`);
   res.json({ success: true });
 };
 
 export const setItemBought = (req, res) => {
   const { id } = req.params;
-  const { username, bought } = req.body;
+  const { bought } = req.body;
 
-  if (!isValidItemId(id) || !isPlausibleUsername(username) || typeof bought !== "boolean") {
+  if (!isValidItemId(id) || typeof bought !== "boolean") {
     return res.status(400).json({ error: "Invalid fields" });
   }
 
-  const item = db.prepare("SELECT name FROM items WHERE id = ? AND username = ?").get(id, username);
+  const item = db.prepare("SELECT name FROM items WHERE id = ? AND username = ?").get(id, req.list);
   if (!item) return res.status(404).json({ error: "Item not found" });
 
-  db.prepare("UPDATE items SET bought = ? WHERE id = ? AND username = ?").run(
+  db.prepare("UPDATE items SET bought = ?, bought_at = ? WHERE id = ? AND username = ?").run(
     bought ? 1 : 0,
+    bought ? Date.now() : null,
     id,
-    username,
+    req.list,
   );
 
-  notifyList(req, username, `${bought ? "✓" : "↩"} ${item.name}`);
+  notifyList(req, `${bought ? "✓" : "↩"} ${item.name}`);
   res.json({ success: true });
 };
 
 export const clearBought = (req, res) => {
-  const { username } = req.query;
-  if (!isPlausibleUsername(username)) {
-    return res.status(400).json({ error: "username is required" });
-  }
-
   const { changes } = db
     .prepare("DELETE FROM items WHERE username = ? AND bought = 1")
-    .run(username);
+    .run(req.list);
 
   if (changes > 0) {
-    notifyList(req, username, `cleared bought (${changes})`);
+    notifyList(req, `cleared bought (${changes})`);
   }
   res.json({ success: true, removed: changes });
 };
 
 export const deleteItem = (req, res) => {
   const { id } = req.params;
-  const { username } = req.query;
-
-  if (!isValidItemId(id) || !isPlausibleUsername(username)) {
+  if (!isValidItemId(id)) {
     return res.status(400).json({ error: "Invalid fields" });
   }
 
-  const item = db.prepare("SELECT name FROM items WHERE id = ? AND username = ?").get(id, username);
-  db.prepare("DELETE FROM items WHERE id = ? AND username = ?").run(id, username);
+  const item = db.prepare("SELECT name FROM items WHERE id = ? AND username = ?").get(id, req.list);
+  db.prepare("DELETE FROM items WHERE id = ? AND username = ?").run(id, req.list);
 
-  if (item) notifyList(req, username, `− ${item.name}`);
+  if (item) notifyList(req, `− ${item.name}`);
   res.json({ success: true });
 };

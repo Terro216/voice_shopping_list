@@ -1,15 +1,12 @@
 import crypto from "crypto";
 import express from "express";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
 import db from "../db/index.js";
 import { config } from "../config.js";
+import { signToken, verifyToken } from "../middleware/auth.js";
 import { isValidNewUsername, isPlausibleUsername, isValidPassword } from "../validation.js";
 
 const router = express.Router();
-
-const signToken = (username) =>
-  jwt.sign({ username }, config.jwtSecret, { expiresIn: config.tokenTtl });
 
 router.post("/register", async (req, res) => {
   const { username, password } = req.body;
@@ -52,6 +49,60 @@ router.post("/login", async (req, res) => {
   }
 
   res.json({ token: signToken(user.username), username: user.username });
+});
+
+// Tokens are stateless, so previously issued ones stay valid until they expire;
+// the caller gets a fresh one to keep using.
+router.post("/password", verifyToken, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (typeof currentPassword !== "string" || !currentPassword) {
+    return res.status(400).json({ error: "Missing fields" });
+  }
+  if (!isValidPassword(newPassword)) {
+    return res.status(400).json({ error: "Password must be at least 8 characters" });
+  }
+
+  const user = db.prepare("SELECT * FROM users WHERE username = ?").get(req.user.username);
+  if (!user || !(await bcrypt.compare(currentPassword, user.password_hash))) {
+    return res.status(401).json({ error: "Current password is wrong" });
+  }
+
+  const hash = await bcrypt.hash(newPassword, config.bcryptRounds);
+  db.prepare("UPDATE users SET password_hash = ? WHERE username = ?").run(hash, user.username);
+
+  res.json({ token: signToken(user.username), username: user.username });
+});
+
+// Removes the account and everything attached to it: the list, its history, its
+// invites, memberships in both directions, and any push subscriptions.
+router.delete("/account", verifyToken, async (req, res) => {
+  const { password } = req.body;
+  if (typeof password !== "string" || !password) {
+    return res.status(400).json({ error: "Password is required" });
+  }
+
+  const username = req.user.username;
+  const user = db.prepare("SELECT * FROM users WHERE username = ?").get(username);
+  if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+    return res.status(401).json({ error: "Password is wrong" });
+  }
+
+  db.transaction(() => {
+    db.prepare("DELETE FROM items WHERE username = ?").run(username);
+    db.prepare("DELETE FROM history WHERE username = ?").run(username);
+    db.prepare("DELETE FROM list_shares WHERE list_username = ?").run(username);
+    db.prepare("DELETE FROM list_access WHERE list_username = ? OR member = ?").run(
+      username,
+      username,
+    );
+    db.prepare("DELETE FROM push_subscriptions WHERE list_username = ? OR subscriber = ?").run(
+      username,
+      username,
+    );
+    db.prepare("DELETE FROM users WHERE username = ?").run(username);
+  })();
+
+  res.json({ success: true });
 });
 
 export default router;
