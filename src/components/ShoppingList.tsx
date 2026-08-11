@@ -12,6 +12,7 @@ import { ShareSheet } from './ShareSheet';
 import { SettingsSheet } from './SettingsSheet';
 import { parseSpeechCommand, ParsedItem } from '../utils/speechParser';
 import { findBestMatch } from '../utils/matchItem';
+import { cue, haptic } from '../utils/feedback';
 import { LANGUAGES, useT, type Lang } from '../i18n';
 import type { ListSummary } from '../api/lists';
 import styles from '../App.module.css';
@@ -50,7 +51,7 @@ export const ShoppingList = ({
     accessDenied,
     addItem,
     removeItem,
-    renameItem,
+    editItem,
     changeCount,
     setBought,
     toggleBought,
@@ -112,6 +113,7 @@ export const ShoppingList = ({
             // Saying something and getting no reaction at all reads as a broken
             // mic; show what was heard and offer to take it literally.
             const spoken = text.trim();
+            cue('unrecognized');
             toast(
               (instance) => (
                 <span className={styles.toastWithAction}>
@@ -131,6 +133,7 @@ export const ShoppingList = ({
             );
             return;
           }
+          cue('added');
           toast.success(
             t('recognized', {
               items: command.items
@@ -163,6 +166,7 @@ export const ShoppingList = ({
             }
           }
           if (found.length > 0) {
+            cue(command.type === 'check' ? 'checked' : 'removed');
             const message =
               command.type === 'check'
                 ? t('checkedOff', { items: found.join(', ') })
@@ -171,11 +175,13 @@ export const ShoppingList = ({
             else toast.success(message);
           }
           if (missed.length > 0) {
+            cue('unrecognized');
             toast.error(t('notOnList', { items: missed.join(', ') }));
           }
           break;
         }
         case 'clearBought':
+          cue('removed');
           await clearBought();
           toastWithUndo(t('boughtCleared'));
           break;
@@ -245,10 +251,15 @@ export const ShoppingList = ({
   const typeaheadChips = matches.filter((s) => !itemNames.has(s.name.toLowerCase())).slice(0, 5);
 
   const rowProps = {
-    onToggleBought: toggleBought,
+    onToggleBought: (id: string) => {
+      // A tap already gives visual feedback, so this stays on the quiet
+      // channel — a beep per tap would be noise in a shop.
+      haptic('checked');
+      toggleBought(id);
+    },
     onIncrement: (id: string) => changeCount(id, +1),
     onDecrement: (id: string) => changeCount(id, -1),
-    onRename: renameItem,
+    onEdit: editItem,
     onRemove: handleRemove,
   };
 

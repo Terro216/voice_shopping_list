@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { changePassword, deleteAccount } from '../api/auth';
+import { cue, isSoundEnabled, setSoundEnabled } from '../utils/feedback';
 import { LANGUAGES, useT, type Lang } from '../i18n';
 import type { ThemeChoice } from '../hooks/useTheme';
 import { Sheet } from './Sheet';
@@ -22,6 +23,13 @@ export const SettingsSheet = ({ lang, setLang, theme, setTheme, onClose, onLogou
   const [deletePassword, setDeletePassword] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [sound, setSound] = useState(isSoundEnabled);
+
+  const toggleSound = (enabled: boolean) => {
+    setSoundEnabled(enabled);
+    setSound(enabled);
+    if (enabled) cue('added'); // let them hear what they just switched on
+  };
 
   const submitPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,6 +90,17 @@ export const SettingsSheet = ({ lang, setLang, theme, setTheme, onClose, onLogou
           ))}
         </select>
       </label>
+
+      <label className={styles.settingRow}>
+        <span>{t('soundCues')}</span>
+        <input
+          type="checkbox"
+          className={styles.toggle}
+          checked={sound}
+          onChange={(e) => toggleSound(e.target.checked)}
+        />
+      </label>
+      <p className={styles.sheetHint}>{t('soundCuesHint')}</p>
 
       <h3 className={styles.sheetSubtitle}>{t('changePassword')}</h3>
       <form className={styles.sheetForm} onSubmit={submitPassword}>

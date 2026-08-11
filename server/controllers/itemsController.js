@@ -1,6 +1,13 @@
 import db from "../db/index.js";
 import { scheduleListPush } from "../push.js";
-import { isValidItemId, isValidCount, normalizeItemName, historyKey, MAX_COUNT } from "../validation.js";
+import {
+  isValidItemId,
+  isValidCount,
+  normalizeItemName,
+  normalizeItemNote,
+  historyKey,
+  MAX_COUNT,
+} from "../validation.js";
 
 // Access model: a list is identified by its owner's username, and reading or
 // writing it requires being the owner or an invited member. `requireListAccess`
@@ -18,7 +25,7 @@ const toItemJson = (row) => ({ ...row, bought: Boolean(row.bought) });
 
 // Active items keep insertion order; bought ones surface most-recently-checked
 // first, so "what did I just tick off" is always at the top of that group.
-const ITEM_COLUMNS = "id, name, count, username, bought, bought_at";
+const ITEM_COLUMNS = "id, name, note, count, username, bought, bought_at";
 const ITEM_ORDER =
   "ORDER BY bought, CASE WHEN bought = 1 THEN -COALESCE(bought_at, 0) ELSE rowid END";
 
@@ -81,8 +88,10 @@ export const getSuggestions = (req, res) => {
 export const addItem = (req, res) => {
   const { id, count, bought } = req.body;
   const name = normalizeItemName(req.body.name);
+  // Undoing a delete re-posts the item as it was, notes included.
+  const note = req.body.note === undefined ? null : normalizeItemNote(req.body.note);
 
-  if (!isValidItemId(id) || !name) {
+  if (!isValidItemId(id) || !name || note === false) {
     return res.status(400).json({ error: "Invalid item fields" });
   }
   if (count !== undefined && !isValidCount(count)) {
@@ -94,8 +103,8 @@ export const addItem = (req, res) => {
 
   try {
     db.prepare(
-      "INSERT INTO items (id, name, count, username, bought, bought_at) VALUES (?, ?, ?, ?, ?, ?)",
-    ).run(id, name, count ?? 1, req.list, bought ? 1 : 0, bought ? Date.now() : null);
+      "INSERT INTO items (id, name, note, count, username, bought, bought_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).run(id, name, note, count ?? 1, req.list, bought ? 1 : 0, bought ? Date.now() : null);
   } catch (err) {
     if (err.code === "SQLITE_CONSTRAINT_PRIMARYKEY") {
       // Offline queue replay can resend the same client-generated id — treat as done.
@@ -146,23 +155,49 @@ export const changeItemCount = (req, res) => {
   res.json({ success: true });
 };
 
-// Fixing what dictation misheard ("малако жирное") without deleting and
-// re-adding the row, which would lose its place and its count.
-export const renameItem = (req, res) => {
+/**
+ * Fixes what dictation misheard ("малако жирное") and attaches the note that
+ * tells whoever is in the shop which one to grab — without deleting and
+ * re-adding the row, which would lose its place and its count. Either field may
+ * be omitted to leave it untouched.
+ */
+export const updateItem = (req, res) => {
   const { id } = req.params;
-  const name = normalizeItemName(req.body.name);
+  const hasName = req.body.name !== undefined;
+  const hasNote = req.body.note !== undefined;
 
-  if (!isValidItemId(id) || !name) {
+  const name = hasName ? normalizeItemName(req.body.name) : null;
+  const note = hasNote ? normalizeItemNote(req.body.note) : null;
+
+  if (!isValidItemId(id) || (!hasName && !hasNote)) {
+    return res.status(400).json({ error: "Invalid fields" });
+  }
+  if ((hasName && !name) || (hasNote && note === false)) {
     return res.status(400).json({ error: "Invalid fields" });
   }
 
+  const assignments = [];
+  const values = [];
+  if (hasName) {
+    assignments.push("name = ?");
+    values.push(name);
+  }
+  if (hasNote) {
+    assignments.push("note = ?");
+    values.push(note);
+  }
+
   const { changes } = db
-    .prepare("UPDATE items SET name = ? WHERE id = ? AND username = ?")
-    .run(name, id, req.list);
+    .prepare(`UPDATE items SET ${assignments.join(", ")} WHERE id = ? AND username = ?`)
+    .run(...values, id, req.list);
   if (changes === 0) return res.status(404).json({ error: "Item not found" });
 
-  recordHistory(req.list, name);
-  notifyList(req, `✎ ${name}`);
+  if (hasName) recordHistory(req.list, name);
+
+  const label = hasName
+    ? `✎ ${name}`
+    : `✎ ${db.prepare("SELECT name FROM items WHERE id = ? AND username = ?").get(id, req.list).name}`;
+  notifyList(req, label);
   res.json({ success: true });
 };
 

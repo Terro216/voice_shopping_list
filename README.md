@@ -18,8 +18,13 @@ Express 5 + SQLite (better-sqlite3) + Socket.IO on the backend.
 - **Bought state**: tap an item to check it off — it sinks to the bottom with a
   strikethrough, most recently checked first; "Clear bought" wipes the cart
   after checkout. The screen stays awake (Wake Lock) while the mic is listening.
-- **Editing**: the ⋯ button on a row opens an inline rename field, with delete
-  tucked behind it so a mis-tap next to "−" cannot wipe an item.
+- **Editing**: the ⋯ button on a row opens an inline editor for the name and a
+  short note ("тот, в красной пачке"), with delete tucked behind it so a mis-tap
+  next to "−" cannot wipe an item.
+- **Eyes-free confirmation**: short, distinguishable tones — rising for an item
+  added, falling for one removed, a blip for a tick, a low buzz for speech that
+  could not be parsed — plus vibration, which stays on even when the tones are
+  switched off in Settings.
 - **Suggestions**: unobtrusive autocomplete from purchase history while typing,
   plus a "Frequent" chip row for one-tap re-adds. History folds ё into е and is
   capped per list.

@@ -3,10 +3,11 @@ import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
 import {
   Item,
+  ItemEdit,
   fetchItems,
   createItem,
   changeItemCount,
-  renameItem as renameItemRequest,
+  updateItem as updateItemRequest,
   setItemBought,
   clearBoughtItems,
   deleteItem,
@@ -35,6 +36,7 @@ const sameList = (a: Item[], b: Item[]) =>
     (item, i) =>
       item.id === b[i].id &&
       item.name === b[i].name &&
+      (item.note ?? null) === (b[i].note ?? null) &&
       item.count === b[i].count &&
       item.bought === b[i].bought,
   );
@@ -226,11 +228,11 @@ export const useShoppingList = (username: string, viewer: string) => {
     [username, applyItems, loadItems],
   );
 
-  const applyRename = useCallback(
-    async (id: string, name: string) => {
-      applyItems((prev) => prev.map((item) => (item.id === id ? { ...item, name } : item)));
+  const applyEdit = useCallback(
+    async (id: string, edit: ItemEdit) => {
+      applyItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...edit } : item)));
       try {
-        await renameItemRequest(id, username, name);
+        await updateItemRequest(id, username, edit);
       } catch {
         loadItems();
       }
@@ -277,6 +279,7 @@ export const useShoppingList = (username: string, viewer: string) => {
       const newItem: Item = {
         id: generateItemId(),
         name: trimmed,
+        note: null,
         count,
         username,
         bought: false,
@@ -299,16 +302,31 @@ export const useShoppingList = (username: string, viewer: string) => {
     [applyAdd, applyRemove],
   );
 
-  const renameItem = useCallback(
-    async (id: string, name: string) => {
-      const trimmed = name.trim();
+  const editItem = useCallback(
+    async (id: string, edit: ItemEdit) => {
       const item = itemsRef.current.find((i) => i.id === id);
-      if (!item || !trimmed || trimmed === item.name) return;
-      const previous = item.name;
-      pushUndo(previous, () => applyRename(id, previous));
-      await applyRename(id, trimmed);
+      if (!item) return;
+
+      const next: ItemEdit = {};
+      if (edit.name !== undefined) {
+        const trimmed = edit.name.trim();
+        if (!trimmed) return; // a nameless item is not an edit, it is a deletion
+        if (trimmed !== item.name) next.name = trimmed;
+      }
+      if (edit.note !== undefined) {
+        const trimmed = edit.note?.trim() || null;
+        if (trimmed !== (item.note ?? null)) next.note = trimmed;
+      }
+      if (Object.keys(next).length === 0) return;
+
+      const previous: ItemEdit = {};
+      if (next.name !== undefined) previous.name = item.name;
+      if (next.note !== undefined) previous.note = item.note ?? null;
+
+      pushUndo(item.name, () => applyEdit(id, previous));
+      await applyEdit(id, next);
     },
-    [applyRename],
+    [applyEdit],
   );
 
   const setBought = useCallback(
@@ -365,7 +383,7 @@ export const useShoppingList = (username: string, viewer: string) => {
     accessDenied,
     addItem,
     removeItem,
-    renameItem,
+    editItem,
     changeCount,
     setBought,
     toggleBought,

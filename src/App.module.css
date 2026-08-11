@@ -229,7 +229,20 @@
   color: var(--text-faint);
 }
 
+.itemText {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
 .itemName {
+  overflow-wrap: anywhere;
+}
+
+.itemNote {
+  font-size: 0.8rem;
+  color: var(--text-faint);
   overflow-wrap: anywhere;
 }
 
@@ -249,14 +262,21 @@
 
 .itemEditor {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   padding: 0 0 0.6rem;
   width: 100%;
 }
 
 .itemEditor input {
-  flex-grow: 1;
+  flex: 1 1 10rem;
   min-width: 0;
+}
+
+.itemEditorActions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .itemCount {
@@ -458,6 +478,14 @@
 .sheetForm input {
   flex: 1 1 12rem;
   min-width: 0;
+}
+
+.toggle {
+  min-height: 0 !important;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
 }
 
 .settingRow {

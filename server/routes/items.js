@@ -4,7 +4,7 @@ import {
   getSuggestions,
   addItem,
   changeItemCount,
-  renameItem,
+  updateItem,
   setItemBought,
   clearBought,
   deleteItem,
@@ -23,7 +23,7 @@ router.post("/", writeLimiter, requireListAccess, addItem);
 router.delete("/bought", writeLimiter, requireListAccess, clearBought);
 router.patch("/:id/count", writeLimiter, requireListAccess, changeItemCount);
 router.patch("/:id/bought", writeLimiter, requireListAccess, setItemBought);
-router.patch("/:id", writeLimiter, requireListAccess, renameItem);
+router.patch("/:id", writeLimiter, requireListAccess, updateItem);
 router.delete("/:id", writeLimiter, requireListAccess, deleteItem);
 
 export default router;

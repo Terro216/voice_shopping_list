@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { cue } from '../utils/feedback';
 
 // lib.dom has no SpeechRecognition types; minimal structural typing of what we use.
 type SpeechRecognitionEventLike = {
@@ -30,34 +31,6 @@ declare global {
 
 const getSpeechRecognition = (): SpeechRecognitionConstructor | undefined =>
   typeof window === 'undefined' ? undefined : window.SpeechRecognition ?? window.webkitSpeechRecognition;
-
-// Browsers cap the number of AudioContexts per page, so one shared lazy
-// instance instead of a new (never-closed) context per beep.
-let audioCtx: AudioContext | null = null;
-
-const playBeep = (frequency: number, duration: number) => {
-  try {
-    audioCtx ??= new AudioContext();
-    if (audioCtx.state === 'suspended') void audioCtx.resume();
-
-    const oscillator = audioCtx.createOscillator();
-    const gainNode = audioCtx.createGain();
-
-    oscillator.type = 'sine';
-    oscillator.frequency.value = frequency;
-
-    gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
-
-    oscillator.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-
-    oscillator.start();
-    oscillator.stop(audioCtx.currentTime + duration);
-  } catch (e) {
-    console.error('Audio playback failed', e);
-  }
-};
 
 // Errors after which the engine will not deliver results until the user acts,
 // so keeping the "listening" state would just lie to them.
@@ -167,14 +140,14 @@ export const useSpeechRecognition = (
     setIsListening(next);
     setInterimText('');
     if (next) {
-      playBeep(880, 0.1);
+      cue('listenStart');
       try {
         recognitionRef.current?.start();
       } catch {
         // already started — fine
       }
     } else {
-      playBeep(440, 0.2);
+      cue('listenStop');
       clearTimeout(restartTimerRef.current);
       try {
         recognitionRef.current?.stop();

@@ -1,4 +1,5 @@
 export const MAX_ITEM_NAME_LENGTH = 200;
+export const MAX_ITEM_NOTE_LENGTH = 200;
 export const MAX_COUNT = 999;
 
 // New usernames: latin letters, digits, _ and -, 3..32 chars. Only enforced on
@@ -23,6 +24,19 @@ export const normalizeItemName = (name) => {
   const trimmed = name.trim().replace(/\s+/g, " ");
   if (trimmed.length === 0 || trimmed.length > MAX_ITEM_NAME_LENGTH) return null;
   return trimmed;
+};
+
+/**
+ * Item notes are optional: `undefined` means "leave it alone", anything that
+ * trims to nothing means "clear it". Returns `false` when the value is not a
+ * usable note, which callers turn into a 400.
+ */
+export const normalizeItemNote = (note) => {
+  if (note === null) return null;
+  if (typeof note !== "string") return false;
+  const trimmed = note.trim().replace(/\s+/g, " ");
+  if (trimmed.length > MAX_ITEM_NOTE_LENGTH) return false;
+  return trimmed.length === 0 ? null : trimmed;
 };
 
 export const isValidCount = (count) =>

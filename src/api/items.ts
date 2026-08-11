@@ -4,10 +4,18 @@ import { enqueueMutation } from './offlineQueue';
 export type Item = {
   id: string;
   name: string;
+  /** Which one to grab: "тот, в красной пачке". */
+  note?: string | null;
   count: number;
   username: string;
   bought: boolean;
   bought_at?: number | null;
+};
+
+/** Fields of an item that can be edited; omitting one leaves it untouched. */
+export type ItemEdit = {
+  name?: string;
+  note?: string | null;
 };
 
 export type Suggestion = {
@@ -55,8 +63,8 @@ export const createItem = (item: Item): Promise<void> => sendOrQueue('/api/items
 export const changeItemCount = (id: string, username: string, delta: number): Promise<void> =>
   sendOrQueue(`/api/items/${encodeURIComponent(id)}/count`, 'PATCH', { username, delta });
 
-export const renameItem = (id: string, username: string, name: string): Promise<void> =>
-  sendOrQueue(`/api/items/${encodeURIComponent(id)}`, 'PATCH', { username, name });
+export const updateItem = (id: string, username: string, edit: ItemEdit): Promise<void> =>
+  sendOrQueue(`/api/items/${encodeURIComponent(id)}`, 'PATCH', { username, ...edit });
 
 export const setItemBought = (id: string, username: string, bought: boolean): Promise<void> =>
   sendOrQueue(`/api/items/${encodeURIComponent(id)}/bought`, 'PATCH', { username, bought });

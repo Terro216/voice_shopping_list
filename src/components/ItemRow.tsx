@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Item } from '../api/items';
+import { Item, ItemEdit } from '../api/items';
 import { useT } from '../i18n';
 import styles from '../App.module.css';
 
@@ -8,7 +8,7 @@ type Props = {
   onToggleBought: (id: string) => void;
   onIncrement: (id: string) => void;
   onDecrement: (id: string) => void;
-  onRename: (id: string, name: string) => void;
+  onEdit: (id: string, edit: ItemEdit) => void;
   onRemove: (id: string) => void;
 };
 
@@ -17,21 +17,23 @@ export const ItemRow = ({
   onToggleBought,
   onIncrement,
   onDecrement,
-  onRename,
+  onEdit,
   onRemove,
 }: Props) => {
   const { t } = useT();
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(item.name);
+  const [nameDraft, setNameDraft] = useState(item.name);
+  const [noteDraft, setNoteDraft] = useState(item.note ?? '');
 
   const openEditor = () => {
-    setDraft(item.name);
+    setNameDraft(item.name);
+    setNoteDraft(item.note ?? '');
     setEditing(true);
   };
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    onRename(item.id, draft);
+    onEdit(item.id, { name: nameDraft, note: noteDraft });
     setEditing(false);
   };
 
@@ -42,12 +44,17 @@ export const ItemRow = ({
           type="button"
           className={styles.itemMain}
           onClick={() => onToggleBought(item.id)}
-          aria-label={item.bought ? t('returnToList', { name: item.name }) : t('markBought', { name: item.name })}
+          aria-label={
+            item.bought ? t('returnToList', { name: item.name }) : t('markBought', { name: item.name })
+          }
         >
           <span className={styles.checkbox} aria-hidden="true">
             {item.bought ? '✓' : ''}
           </span>
-          <span className={styles.itemName}>{item.name}</span>
+          <span className={styles.itemText}>
+            <span className={styles.itemName}>{item.name}</span>
+            {item.note && <span className={styles.itemNote}>{item.note}</span>}
+          </span>
           {item.count > 1 && <span className={styles.itemCount}>×{item.count}</span>}
         </button>
 
@@ -75,7 +82,7 @@ export const ItemRow = ({
           <button
             className={styles.stepButton}
             onClick={() => (editing ? setEditing(false) : openEditor())}
-            aria-label={t('rename')}
+            aria-label={t('edit')}
             aria-expanded={editing}
           >
             ⋯
@@ -86,21 +93,29 @@ export const ItemRow = ({
       {editing && (
         <form className={styles.itemEditor} onSubmit={submit}>
           <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
             aria-label={t('renamePlaceholder')}
             placeholder={t('renamePlaceholder')}
             autoFocus
           />
-          <button type="submit">{t('save')}</button>
-          <button
-            type="button"
-            className={styles.removeButton}
-            onClick={() => onRemove(item.id)}
-            aria-label={t('removeItem', { name: item.name })}
-          >
-            🗑
-          </button>
+          <input
+            value={noteDraft}
+            onChange={(e) => setNoteDraft(e.target.value)}
+            aria-label={t('notePlaceholder')}
+            placeholder={t('notePlaceholder')}
+          />
+          <div className={styles.itemEditorActions}>
+            <button type="submit">{t('save')}</button>
+            <button
+              type="button"
+              className={styles.removeButton}
+              onClick={() => onRemove(item.id)}
+              aria-label={t('removeItem', { name: item.name })}
+            >
+              🗑
+            </button>
+          </div>
         </form>
       )}
     </div>

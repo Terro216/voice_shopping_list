@@ -165,6 +165,31 @@ try {
   r = await api('/api/items/item-r', { method: 'PATCH', token, body: { username: user, name: '   ' } });
   check('rename to blank → 400', r.status === 400, JSON.stringify(r));
 
+  // ---- notes ----
+  r = await api('/api/items/item-r', { method: 'PATCH', token, body: { username: user, note: '  тот, в красной  пачке ' } });
+  check('set note → 200', r.status === 200, JSON.stringify(r));
+  r = await api(`/api/items?username=${user}`, { token });
+  {
+    const edited = r.data?.find((i) => i.id === 'item-r');
+    check('note stored and normalized', edited?.note === 'тот, в красной пачке', JSON.stringify(edited));
+    check('setting a note leaves the name alone', edited?.name === 'молоко жирное', JSON.stringify(edited));
+  }
+
+  r = await api('/api/items/item-r', { method: 'PATCH', token, body: { username: user, note: '' } });
+  r = await api(`/api/items?username=${user}`, { token });
+  check('empty note clears it', r.data?.find((i) => i.id === 'item-r')?.note === null, JSON.stringify(r.data));
+
+  r = await api('/api/items/item-r', { method: 'PATCH', token, body: { username: user, note: 'x'.repeat(201) } });
+  check('overlong note → 400', r.status === 400, JSON.stringify(r));
+
+  r = await api('/api/items/item-r', { method: 'PATCH', token, body: { username: user } });
+  check('patch with nothing to change → 400', r.status === 400, JSON.stringify(r));
+
+  r = await api('/api/items', { method: 'POST', token, body: { id: 'item-n', name: 'сыр', note: 'без плесени', username: user } });
+  check('item created with a note → 201', r.status === 201, JSON.stringify(r));
+  r = await api(`/api/items?username=${user}`, { token });
+  check('created note round-trips', r.data?.find((i) => i.id === 'item-n')?.note === 'без плесени', JSON.stringify(r.data));
+
   // ---- most recently bought sorts first within the bought group ----
   await api('/api/items', { method: 'POST', token, body: { id: 'b-1', name: 'первый', username: user } });
   await api('/api/items', { method: 'POST', token, body: { id: 'b-2', name: 'второй', username: user } });
