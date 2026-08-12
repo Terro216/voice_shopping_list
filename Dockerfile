@@ -21,6 +21,9 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 COPY server ./server
+# Maintenance scripts run inside the container because the data volume belongs
+# to it: `docker compose exec -T web node scripts/backup.mjs`.
+COPY scripts ./scripts
 
 EXPOSE 3000
 

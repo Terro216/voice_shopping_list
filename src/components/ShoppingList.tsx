@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useShoppingList } from '../hooks/useShoppingList';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
@@ -10,7 +10,9 @@ import { ItemRow } from './ItemRow';
 import { PushToggle } from './PushToggle';
 import { ShareSheet } from './ShareSheet';
 import { SettingsSheet } from './SettingsSheet';
+import { ImportSheet } from './ImportSheet';
 import { parseSpeechCommand, ParsedItem } from '../utils/speechParser';
+import { takeMicIntent, takeSharedText } from '../launchIntent';
 import { findBestMatch } from '../utils/matchItem';
 import { cue, haptic } from '../utils/feedback';
 import { LANGUAGES, useT, type Lang } from '../i18n';
@@ -59,7 +61,8 @@ export const ShoppingList = ({
     undo,
   } = useShoppingList(username, viewer);
   const [newItemName, setNewItemName] = useState('');
-  const [sheet, setSheet] = useState<'none' | 'share' | 'settings'>('none');
+  const [sheet, setSheet] = useState<'none' | 'share' | 'settings' | 'import'>('none');
+  const [importText, setImportText] = useState('');
   const { frequent, matches, refreshFrequent } = useSuggestions(username, newItemName);
 
   const addAndRefresh = useCallback(
@@ -210,6 +213,38 @@ export const ShoppingList = ({
   // Keep the phone awake while dictating in the store.
   useWakeLock(isListening);
 
+  const openImport = (text = '') => {
+    setImportText(text);
+    setSheet('import');
+  };
+
+  const handleImport = useCallback(
+    async (parsed: ParsedItem[]) => {
+      setSheet('none');
+      for (const item of parsed) {
+        await addAndRefresh(item.name, item.count);
+      }
+      if (parsed.length > 0) {
+        cue('added');
+        toast.success(t('imported', { count: parsed.length }));
+      }
+    },
+    [addAndRefresh, t],
+  );
+
+  // Text shared into the app from another one lands in the import screen.
+  useEffect(() => {
+    const shared = takeSharedText();
+    if (shared) openImport(shared);
+  }, []);
+
+  // Opened from the home-screen "mic" shortcut: start listening right away
+  // instead of making them find the button. takeMicIntent answers once, so a
+  // re-run of this effect cannot toggle the mic back off.
+  useEffect(() => {
+    if (isSupported && takeMicIntent()) toggleListening();
+  }, [isSupported, toggleListening]);
+
   const handleManualAdd = (e: React.FormEvent) => {
     e.preventDefault();
     addAndRefresh(newItemName);
@@ -278,6 +313,15 @@ export const ShoppingList = ({
             ↩️
           </button>
           <PushToggle list={username} />
+          <button
+            type="button"
+            className={styles.iconButton}
+            onClick={() => openImport()}
+            title={t('import')}
+            aria-label={t('import')}
+          >
+            📋
+          </button>
           <button
             type="button"
             className={styles.iconButton}
@@ -408,6 +452,13 @@ export const ShoppingList = ({
             onSelectList(viewer);
             onListsChanged();
           }}
+        />
+      )}
+      {sheet === 'import' && (
+        <ImportSheet
+          initialText={importText}
+          onAdd={handleImport}
+          onClose={() => setSheet('none')}
         />
       )}
       {sheet === 'settings' && (

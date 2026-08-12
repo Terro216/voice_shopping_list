@@ -107,6 +107,38 @@ export const parseSpeechText = (text: string): ParsedItem[] => {
     .filter((item): item is ParsedItem => item !== null);
 };
 
+// Bullets and numbering people paste along with their lists.
+const LIST_MARKER_RE = /^\s*(?:[-*•·–—]+|\d+[.)])\s*/;
+
+const MAX_BULK_COUNT = 999;
+
+/**
+ * Pasted or shared multi-line text → items. Each line goes through the same
+ * pipeline as speech (so "2 молока" and "хлеб, яйца" both work), and repeats
+ * across lines are merged into one entry rather than added twice.
+ */
+export const parseBulkText = (text: string): ParsedItem[] => {
+  const merged = new Map<string, ParsedItem>();
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.replace(LIST_MARKER_RE, '').trim();
+    // A link shared from a browser comes through as a line of its own.
+    if (!line || /^[a-z][a-z0-9+.-]*:\/\//i.test(line)) continue;
+
+    for (const item of parseSpeechText(line)) {
+      const key = item.name.toLowerCase();
+      const existing = merged.get(key);
+      if (existing) {
+        existing.count = Math.min(MAX_BULK_COUNT, existing.count + item.count);
+      } else {
+        merged.set(key, { ...item });
+      }
+    }
+  }
+
+  return [...merged.values()];
+};
+
 // Command verbs. Note the tense distinction: "купи" (imperative) adds,
 // "купил/купила" (past — "I bought it") checks off.
 const UNDO_RE = /^(отмена|отмени|отменить|верни как было|undo|cancel)[.!]?$/;

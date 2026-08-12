@@ -25,6 +25,10 @@ Express 5 + SQLite (better-sqlite3) + Socket.IO on the backend.
   added, falling for one removed, a blip for a tick, a low buzz for speech that
   could not be parsed — plus vibration, which stays on even when the tones are
   switched off in Settings.
+- **Bulk input**: paste a list from notes or a chat, or use the system "Share"
+  sheet from any app — the text is parsed line by line and shown for review
+  before anything is added. A home-screen shortcut opens straight into
+  dictation.
 - **Suggestions**: unobtrusive autocomplete from purchase history while typing,
   plus a "Frequent" chip row for one-tap re-adds. History folds ё into е and is
   capped per list.
@@ -91,23 +95,26 @@ npm run build             # tsc + vite build (output in dist/, served by server)
 
 ## Backups
 
+The data volume belongs to the container, so backups run inside it:
+
 ```bash
-npm run backup            # consistent snapshot into data/backups/, keeps the last 14
+docker compose exec -T web node scripts/backup.mjs
 ```
 
-Safe to run against a live server. `BACKUP_DIR` and `BACKUP_KEEP` override the
-destination and how many snapshots are retained; a nightly cron entry is
-suggested in `scripts/backup.mjs`.
+This takes a consistent snapshot into `data/backups/` and keeps the newest 14
+(`BACKUP_KEEP`, `BACKUP_DIR` to override). It is safe against a live server.
+A nightly entry is installed in the host's crontab.
 
 ## Deployment (Docker + Caddy)
 
 ```bash
 cp .env.example .env      # set DOMAIN and JWT_SECRET
 mkdir -p data             # persistent SQLite volume
-docker-compose up -d --build
+./scripts/deploy.sh
 ```
 
-The container serves the built SPA and API on port 3000; the compose file
-attaches it to the external `caddy_net` network with labels for
-`shopping.$DOMAIN`. Pending migrations are applied at startup — take a backup
-before deploying a version that adds one.
+`deploy.sh` snapshots the database, rebuilds, restarts, and waits for the app to
+answer before reporting success — pending migrations are applied at startup, so
+the snapshot matters. The container serves the built SPA and API on port 3000;
+the compose file attaches it to the external `caddy_net` network with labels for
+`shopping.$DOMAIN`.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSpeechText, parseSpeechCommand } from './speechParser';
+import { parseSpeechText, parseSpeechCommand, parseBulkText } from './speechParser';
 
 describe('speechParser', () => {
   it('parses simple russian sentences with "и"', () => {
@@ -124,5 +124,50 @@ describe('parseSpeechCommand', () => {
       type: 'check',
       queries: ['milk', 'bread'],
     });
+  });
+});
+
+describe('parseBulkText', () => {
+  it('takes one item per line', () => {
+    expect(parseBulkText('молоко\nхлеб\nяйца')).toEqual([
+      { name: 'молоко', count: 1 },
+      { name: 'хлеб', count: 1 },
+      { name: 'яйца', count: 1 },
+    ]);
+  });
+
+  it('strips bullets and numbering', () => {
+    expect(parseBulkText('- молоко\n* хлеб\n1. яйца\n2) сыр')).toEqual([
+      { name: 'молоко', count: 1 },
+      { name: 'хлеб', count: 1 },
+      { name: 'яйца', count: 1 },
+      { name: 'сыр', count: 1 },
+    ]);
+  });
+
+  it('keeps quantities and splits a line with several items', () => {
+    expect(parseBulkText('2 молока\nсыр, яйца')).toEqual([
+      { name: 'молока', count: 2 },
+      { name: 'сыр', count: 1 },
+      { name: 'яйца', count: 1 },
+    ]);
+  });
+
+  it('merges repeats across lines instead of duplicating them', () => {
+    expect(parseBulkText('молоко\n2 молоко\nхлеб')).toEqual([
+      { name: 'молоко', count: 3 },
+      { name: 'хлеб', count: 1 },
+    ]);
+  });
+
+  it('skips blank lines and shared links', () => {
+    expect(parseBulkText('молоко\n\nhttps://example.com/recipe\n   \nхлеб')).toEqual([
+      { name: 'молоко', count: 1 },
+      { name: 'хлеб', count: 1 },
+    ]);
+  });
+
+  it('returns nothing for text without items', () => {
+    expect(parseBulkText('\n  \n')).toEqual([]);
   });
 });

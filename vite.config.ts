@@ -27,6 +27,24 @@ export default defineConfig({
             purpose: 'any',
           },
         ],
+        // Long-press the home screen icon to land straight in dictation
+        // instead of on the list.
+        shortcuts: [
+          {
+            name: 'Продиктовать список',
+            short_name: 'Микрофон',
+            description: 'Открыть приложение с включённым микрофоном',
+            url: '/?mic=1',
+            icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' }],
+          },
+        ],
+        // Makes the app a target for "Share" from notes, chats and browsers:
+        // the shared text opens in the import screen, already parsed.
+        share_target: {
+          action: '/',
+          method: 'GET',
+          params: { title: 'title', text: 'text', url: 'url' },
+        },
       },
     }),
   ],
