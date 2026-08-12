@@ -16,9 +16,23 @@ fi
 
 say "Backing up the database"
 if docker compose ps --status running --quiet web | grep -q .; then
-  # The data volume belongs to the container, so the snapshot is taken from
-  # inside it. A pending migration is exactly when this matters most.
-  docker compose exec -T web node scripts/backup.mjs
+  # Taken from inside the container, which owns the data volume. Deliberately
+  # inline rather than calling scripts/backup.mjs: the container still running
+  # at this point is the *previous* build, which may predate that script.
+  # better-sqlite3 is the only thing this relies on, and every build has it.
+  # The filename matches what the scheduled backup writes, so the nightly
+  # rotation cleans these up too.
+  docker compose exec -T web node --input-type=commonjs -e '
+    const Database = require("better-sqlite3");
+    const fs = require("fs");
+    fs.mkdirSync("/app/data/backups", { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const target = "/app/data/backups/database-" + stamp + ".sqlite";
+    const db = new Database("/app/data/database.sqlite", { readonly: true });
+    db.backup(target)
+      .then(() => { db.close(); console.log("Snapshot: " + target); })
+      .catch((err) => { console.error("Backup failed: " + err.message); process.exit(1); });
+  '
 else
   echo "Container is not running — nothing to back up yet, continuing."
 fi
