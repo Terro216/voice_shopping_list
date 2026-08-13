@@ -22,8 +22,9 @@ const flush = async (list, actor, labels) => {
 
   const summary =
     labels.slice(0, 4).join(", ") + (labels.length > 4 ? `, +${labels.length - 4} more` : "");
+  const name = db.prepare("SELECT name FROM lists WHERE id = ?").get(list)?.name ?? list;
   const payload = JSON.stringify({
-    title: `🛒 ${list}`,
+    title: `🛒 ${name}`,
     body: `${actor}: ${summary}`,
     tag: `list-${list}`,
     url: `/?list=${encodeURIComponent(list)}`,

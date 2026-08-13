@@ -7,7 +7,8 @@ import styles from '../App.module.css';
 
 type Props = {
   list: string;
-  viewer: string;
+  listName: string;
+  owned: boolean;
   onClose: () => void;
   onLeft: () => void;
 };
@@ -24,9 +25,8 @@ const inviteUrl = (token: string) => {
  * list's name, so knowing that someone is called "maria" no longer grants any
  * access to maria's list.
  */
-export const ShareSheet = ({ list, viewer, onClose, onLeft }: Props) => {
+export const ShareSheet = ({ list, listName, owned, onClose, onLeft }: Props) => {
   const { t } = useT();
-  const owned = list === viewer;
   const [token, setToken] = useState<string | null>(null);
   const [members, setMembers] = useState<string[]>([]);
 
@@ -41,10 +41,10 @@ export const ShareSheet = ({ list, viewer, onClose, onLeft }: Props) => {
 
   useEffect(() => {
     if (!owned) return;
-    fetchShareToken()
+    fetchShareToken(list)
       .then((data) => setToken(data.token))
       .catch(() => setToken(null));
-  }, [owned]);
+  }, [owned, list]);
 
   useEffect(() => {
     void loadMembers();
@@ -62,7 +62,7 @@ export const ShareSheet = ({ list, viewer, onClose, onLeft }: Props) => {
 
   const rotate = async () => {
     try {
-      const data = await rotateShareToken();
+      const data = await rotateShareToken(list);
       setToken(data.token);
       toast.success(t('linkRotated'));
     } catch {
@@ -83,7 +83,7 @@ export const ShareSheet = ({ list, viewer, onClose, onLeft }: Props) => {
   const leave = async () => {
     try {
       await leaveList(list);
-      toast.success(t('leftList', { list }));
+      toast.success(t('leftList', { list: listName }));
       onLeft();
     } catch {
       toast.error(t('somethingWrong'));
@@ -130,7 +130,7 @@ export const ShareSheet = ({ list, viewer, onClose, onLeft }: Props) => {
       ) : (
         <>
           <p className={styles.sheetHint}>
-            {t('activeList')}: <strong>{list}</strong>
+            {t('activeList')}: <strong>{listName}</strong>
           </p>
           <div className={styles.sheetActions}>
             <button type="button" className={styles.dangerButton} onClick={leave}>

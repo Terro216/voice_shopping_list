@@ -1,4 +1,4 @@
-import { adoptRenewedToken, authHeaders, notifyAuthExpired } from './client';
+import { adoptRenewedToken, authHeaders, notifyAuthExpired, notifyRateLimited } from './client';
 
 export type QueuedMutation = {
   url: string;
@@ -92,6 +92,12 @@ export const syncOfflineQueue = async (): Promise<SyncResult> => {
         // The queue outlived the session. Keep everything and let the user log
         // back in; the replay resumes with a fresh token.
         notifyAuthExpired();
+        break;
+      }
+      if (res.status === 429) {
+        // The replay is what is hitting the limit; say so rather than looking
+        // like a sync that mysteriously stalled.
+        notifyRateLimited();
         break;
       }
       if (!res.ok && isRetryable(res.status)) break;

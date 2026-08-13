@@ -7,7 +7,11 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // The app announces a new version instead of swapping it in silently:
+      // see src/pwa.ts. `injectRegister: null` because that module registers
+      // the worker itself — the injected snippet would do it a second time.
+      registerType: 'prompt',
+      injectRegister: null,
       workbox: {
         // Web Push handlers live in public/push-sw.js
         importScripts: ['push-sw.js'],

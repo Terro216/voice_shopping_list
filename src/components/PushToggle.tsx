@@ -12,6 +12,8 @@ import {
 
 type Props = {
   list: string;
+  /** Shown to the user; `list` itself is an opaque id. */
+  listName: string;
 };
 
 type State = 'hidden' | 'off' | 'on' | 'busy';
@@ -24,7 +26,7 @@ const pushSupported = () =>
  * list. Renders nothing when push is unavailable (unsupported browser, no
  * service worker in dev, VAPID not configured on the server).
  */
-export const PushToggle = ({ list }: Props) => {
+export const PushToggle = ({ list, listName }: Props) => {
   const { t } = useT();
   const [state, setState] = useState<State>('hidden');
   const publicKeyRef = useRef<string | null>(null);
@@ -75,7 +77,7 @@ export const PushToggle = ({ list }: Props) => {
 
       await savePushSubscription(subscription.toJSON(), list);
       setState('on');
-      toast.success(t('notificationsOn', { list }));
+      toast.success(t('notificationsOn', { list: listName }));
     } catch {
       toast.error(t('notificationsFailed'));
       setState('off');

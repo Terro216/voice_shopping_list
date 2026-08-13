@@ -1,6 +1,12 @@
 export const MAX_ITEM_NAME_LENGTH = 200;
 export const MAX_ITEM_NOTE_LENGTH = 200;
 export const MAX_COUNT = 999;
+export const MAX_LIST_NAME_LENGTH = 60;
+// Generous enough that nobody sane hits it, low enough that a scripted loop
+// cannot fill the database with empty lists.
+export const MAX_LISTS_PER_OWNER = 50;
+// One reorder request carries the whole visible order, so this bounds it.
+export const MAX_ORDER_IDS = 1000;
 
 // New usernames: latin letters, digits, _ and -, 3..32 chars. Only enforced on
 // registration — pre-existing accounts with other names must still be able to
@@ -15,6 +21,20 @@ export const isPlausibleUsername = (username) =>
 export const isValidPassword = (password) =>
   // bcrypt silently truncates input at 72 bytes, hence the upper bound.
   typeof password === "string" && password.length >= 8 && Buffer.byteLength(password) <= 72;
+
+/**
+ * A list id. Lists created since they became first-class carry a random token,
+ * but an account's original list is still identified by its owner's username —
+ * which for pre-existing accounts can be any string — so this stays permissive.
+ */
+export const isValidListId = isPlausibleUsername;
+
+export const normalizeListName = (name) => {
+  if (typeof name !== "string") return null;
+  const trimmed = name.trim().replace(/\s+/g, " ");
+  if (trimmed.length === 0 || trimmed.length > MAX_LIST_NAME_LENGTH) return null;
+  return trimmed;
+};
 
 export const isValidItemId = (id) =>
   typeof id === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(id);

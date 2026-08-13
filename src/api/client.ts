@@ -19,6 +19,16 @@ export class NetworkError extends Error {
 // Fired when the server rejects our stored token; App listens and logs out.
 export const AUTH_EXPIRED_EVENT = 'auth-expired';
 
+/**
+ * Fired on any 429. The limit is per account and generous, so hitting it means
+ * something is wrong (a stuck retry loop, a second device gone haywire) and the
+ * app has to say so instead of failing silently wherever the call happened to
+ * be made — which is what it used to do outside the few screens that checked.
+ */
+export const RATE_LIMITED_EVENT = 'rate-limited';
+
+export const notifyRateLimited = () => window.dispatchEvent(new Event(RATE_LIMITED_EVENT));
+
 export const getToken = () => localStorage.getItem('token');
 
 /**
@@ -86,6 +96,7 @@ export const request = async <T>(url: string, options: RequestOptions = {}): Pro
 
   if (!res.ok) {
     if (auth && res.status === 401) notifyAuthExpired();
+    if (res.status === 429) notifyRateLimited();
     const message =
       data && typeof data.error === 'string' ? data.error : `Request failed (${res.status})`;
     throw new ApiError(res.status, message);

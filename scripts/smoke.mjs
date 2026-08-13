@@ -267,6 +267,135 @@ try {
   r = await api(`/api/items?username=${user}`, { token: otherToken });
   check('removed member loses access → 403', r.status === 403, JSON.stringify(r));
 
+  // ---- the deleted drawer: deleting hides an item, it does not destroy it ----
+  r = await api(`/api/items/deleted?username=${user}`, { token });
+  check(
+    'deleted items are kept in the drawer',
+    r.status === 200 && r.data?.some((i) => i.id === 'item-3'),
+    JSON.stringify(r.data),
+  );
+  check(
+    'the drawer is not part of the list itself',
+    !(await api(`/api/items?username=${user}`, { token })).data.some((i) => i.id === 'item-3'),
+  );
+
+  r = await api('/api/items/item-3/restore', { method: 'POST', token, body: { username: user } });
+  check('restore → 200', r.status === 200, JSON.stringify(r));
+  r = await api(`/api/items?username=${user}`, { token });
+  check(
+    'a restored item is back on the list and not bought',
+    r.data?.some((i) => i.id === 'item-3' && i.bought === false),
+    JSON.stringify(r.data),
+  );
+
+  r = await api('/api/items/item-3/restore', { method: 'POST', token, body: { username: user } });
+  check('restoring something that is not deleted → 404', r.status === 404, JSON.stringify(r));
+
+  // Undo re-posts a deleted item under its original id; that has to bring it back.
+  await api(`/api/items/item-3?username=${user}`, { method: 'DELETE', token });
+  r = await api('/api/items', { method: 'POST', token, body: { id: 'item-3', name: 'хлеб', count: 2, username: user } });
+  check('re-posting a deleted id revives it → 201', r.status === 201, JSON.stringify(r));
+  r = await api(`/api/items?username=${user}`, { token });
+  check(
+    'the revived item carries the re-posted fields',
+    r.data?.find((i) => i.id === 'item-3')?.count === 2,
+    JSON.stringify(r.data),
+  );
+
+  r = await api(`/api/items/deleted?username=${user}`, { method: 'DELETE', token });
+  check('emptying the drawer → 200', r.status === 200 && r.data?.purged > 0, JSON.stringify(r));
+  r = await api(`/api/items/deleted?username=${user}`, { token });
+  check('the drawer is empty afterwards', r.data?.length === 0, JSON.stringify(r.data));
+
+  // ---- manual order ----
+  r = await api(`/api/items?username=${user}`, { token });
+  const activeIds = r.data.filter((i) => !i.bought).map((i) => i.id);
+  check('there are several active items to order', activeIds.length >= 3, JSON.stringify(activeIds));
+
+  const reversed = [...activeIds].reverse();
+  r = await api('/api/items/order', { method: 'PUT', token, body: { username: user, ids: reversed } });
+  check('reorder → 200', r.status === 200, JSON.stringify(r));
+  r = await api(`/api/items?username=${user}`, { token });
+  check(
+    'the list comes back in the requested order',
+    r.data.filter((i) => !i.bought).map((i) => i.id).join() === reversed.join(),
+    JSON.stringify(r.data.map((i) => i.id)),
+  );
+
+  // A stale tab may not know about every row; the ones it omits must survive.
+  r = await api('/api/items/order', {
+    method: 'PUT',
+    token,
+    body: { username: user, ids: [reversed[reversed.length - 1]] },
+  });
+  r = await api(`/api/items?username=${user}`, { token });
+  check(
+    'items left out of a reorder stay on the list',
+    r.data.filter((i) => !i.bought).length === activeIds.length,
+    JSON.stringify(r.data.map((i) => i.id)),
+  );
+  check(
+    'the mentioned item moved to the front',
+    r.data.filter((i) => !i.bought)[0].id === reversed[reversed.length - 1],
+    JSON.stringify(r.data.map((i) => i.id)),
+  );
+
+  r = await api('/api/items/order', { method: 'PUT', token, body: { username: user, ids: 'nope' } });
+  check('a malformed order payload → 400', r.status === 400, JSON.stringify(r));
+
+  // ---- several named lists per account ----
+  r = await api('/api/lists', { method: 'POST', token, body: { name: '  Дача  ' } });
+  const dacha = r.data;
+  check('create a list → 201', r.status === 201 && dacha?.owned === true, JSON.stringify(r));
+  check('the name is normalized', dacha?.name === 'Дача', JSON.stringify(dacha));
+  check('a new list gets an id of its own', typeof dacha?.id === 'string' && dacha.id !== user, JSON.stringify(dacha));
+
+  r = await api('/api/lists', { method: 'POST', token, body: { name: '   ' } });
+  check('a blank list name → 400', r.status === 400, JSON.stringify(r));
+
+  r = await api('/api/lists', { token });
+  check('both lists are listed', r.data?.filter((l) => l.owned).length >= 2, JSON.stringify(r.data));
+
+  r = await api('/api/items', { method: 'POST', token, body: { id: 'd-1', name: 'грабли', username: dacha.id } });
+  check('add to the second list → 201', r.status === 201, JSON.stringify(r));
+  r = await api(`/api/items?username=${encodeURIComponent(dacha.id)}`, { token });
+  check('the second list holds only its own items', r.data?.length === 1 && r.data[0].name === 'грабли', JSON.stringify(r.data));
+
+  r = await api(`/api/items?username=${encodeURIComponent(dacha.id)}`, { token: otherToken });
+  check('a stranger cannot read the second list → 403', r.status === 403, JSON.stringify(r));
+
+  r = await api(`/api/lists/${encodeURIComponent(dacha.id)}`, { method: 'PATCH', token, body: { name: 'Дача и сад' } });
+  check('rename a list → 200', r.status === 200 && r.data?.name === 'Дача и сад', JSON.stringify(r));
+  r = await api(`/api/lists/${encodeURIComponent(dacha.id)}`, { method: 'PATCH', token: otherToken, body: { name: 'моё' } });
+  check('only the owner may rename → 403', r.status === 403, JSON.stringify(r));
+
+  r = await api(`/api/lists/share?list=${encodeURIComponent(dacha.id)}`, { token });
+  const dachaInvite = r.data?.token;
+  check('the second list has an invite of its own', typeof dachaInvite === 'string' && dachaInvite !== rotated, JSON.stringify(r));
+
+  r = await api(`/api/lists/share?list=${encodeURIComponent(dacha.id)}`, { token: otherToken });
+  check('a stranger cannot ask for its invite → 403', r.status === 403, JSON.stringify(r));
+
+  r = await api('/api/lists/join', { method: 'POST', token: otherToken, body: { token: dachaInvite } });
+  check('joining answers with the list and its name', r.data?.list === dacha.id && r.data?.name === 'Дача и сад', JSON.stringify(r));
+  r = await api(`/api/items?username=${encodeURIComponent(dacha.id)}`, { token: otherToken });
+  check('the new member can read it', r.status === 200, JSON.stringify(r));
+
+  r = await api(`/api/lists/${encodeURIComponent(user)}`, { method: 'DELETE', token });
+  check('the main list cannot be deleted → 400', r.status === 400, JSON.stringify(r));
+
+  r = await api(`/api/lists/${encodeURIComponent(dacha.id)}`, { method: 'DELETE', token: otherToken });
+  check('a member "deleting" a list only leaves it', r.data?.left === true, JSON.stringify(r));
+  r = await api(`/api/items?username=${encodeURIComponent(dacha.id)}`, { token: otherToken });
+  check('after leaving there is no access → 403', r.status === 403, JSON.stringify(r));
+  r = await api(`/api/items?username=${encodeURIComponent(dacha.id)}`, { token });
+  check('the owner still has their list', r.status === 200, JSON.stringify(r));
+
+  r = await api(`/api/lists/${encodeURIComponent(dacha.id)}`, { method: 'DELETE', token });
+  check('the owner deletes the list → 200', r.data?.deleted === true, JSON.stringify(r));
+  r = await api(`/api/items?username=${encodeURIComponent(dacha.id)}`, { token });
+  check('a deleted list is gone → 403', r.status === 403, JSON.stringify(r));
+
   // ---- realtime: the socket carries the same token as the REST calls ----
   const openSocket = (auth) =>
     new Promise((resolve) => {

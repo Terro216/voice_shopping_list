@@ -7,9 +7,14 @@ export type Item = {
   /** Which one to grab: "тот, в красной пачке". */
   note?: string | null;
   count: number;
+  /** The list this belongs to. Named `username` because a list used to be one. */
   username: string;
   bought: boolean;
   bought_at?: number | null;
+  /** Manual order among the active items; rewritten by dragging a row. */
+  position?: number | null;
+  /** Set on items sitting in the list's "deleted" drawer. */
+  deleted_at?: number | null;
 };
 
 /** Fields of an item that can be edited; omitting one leaves it untouched. */
@@ -77,3 +82,21 @@ export const deleteItem = (id: string, username: string): Promise<void> =>
     `/api/items/${encodeURIComponent(id)}?username=${encodeURIComponent(username)}`,
     'DELETE',
   );
+
+/** Items in the list's "deleted" drawer, most recently removed first. */
+export const fetchDeletedItems = (username: string): Promise<Item[]> =>
+  request<Item[]>(`/api/items/deleted?username=${encodeURIComponent(username)}`);
+
+export const restoreItem = (id: string, username: string): Promise<void> =>
+  sendOrQueue(`/api/items/${encodeURIComponent(id)}/restore`, 'POST', { username });
+
+export const purgeDeletedItems = (username: string): Promise<void> =>
+  sendOrQueue(`/api/items/deleted?username=${encodeURIComponent(username)}`, 'DELETE');
+
+/**
+ * Rewrites the manual order. The whole visible order is sent, not a move, so a
+ * request that gets replayed late cannot shuffle the list into something the
+ * user never asked for — it is simply out of date and harmless.
+ */
+export const reorderItems = (username: string, ids: string[]): Promise<void> =>
+  sendOrQueue('/api/items/order', 'PUT', { username, ids });

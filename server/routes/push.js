@@ -5,7 +5,7 @@ import { pushEnabled } from "../push.js";
 import { verifyToken } from "../middleware/auth.js";
 import { readLimiter, writeLimiter } from "../middleware/rateLimits.js";
 import { hasListAccess } from "../lists.js";
-import { isPlausibleUsername } from "../validation.js";
+import { isValidListId } from "../validation.js";
 
 const router = express.Router();
 
@@ -28,7 +28,7 @@ router.post("/subscribe", verifyToken, writeLimiter, (req, res) => {
   if (!pushEnabled) return res.status(503).json({ error: "Push is not configured" });
 
   const { subscription, list } = req.body;
-  if (!isValidSubscription(subscription) || !isPlausibleUsername(list)) {
+  if (!isValidSubscription(subscription) || !isValidListId(list)) {
     return res.status(400).json({ error: "Invalid subscription" });
   }
   if (!hasListAccess(req.user.username, list)) {

@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 import { config } from "../config.js";
 import { hasListAccess } from "../lists.js";
-import { isPlausibleUsername } from "../validation.js";
+import { isValidListId } from "../validation.js";
 
 export const signToken = (username) =>
   jwt.sign({ username }, config.jwtSecret, { expiresIn: config.tokenTtl });
@@ -34,13 +34,14 @@ export const verifyToken = (req, res, next) => {
 };
 
 /**
- * Guards every list-scoped endpoint. The list name arrives as `username` (query
- * for reads, body for writes) — the token says who is asking, this says whether
- * they may.
+ * Guards every list-scoped endpoint. The list id arrives as `username` (query
+ * for reads, body for writes) — the parameter kept its old name so that offline
+ * mutations queued before lists became first-class still replay. The token says
+ * who is asking, this says whether they may.
  */
 export const requireListAccess = (req, res, next) => {
   const list = req.method === "GET" || req.method === "DELETE" ? req.query.username : req.body?.username;
-  if (!isPlausibleUsername(list)) {
+  if (!isValidListId(list)) {
     return res.status(400).json({ error: "username is required" });
   }
   if (!hasListAccess(req.user.username, list)) {

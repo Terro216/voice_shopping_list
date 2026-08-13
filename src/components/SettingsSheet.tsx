@@ -12,11 +12,20 @@ type Props = {
   setLang: (lang: Lang) => void;
   theme: ThemeChoice;
   setTheme: (theme: ThemeChoice) => void;
+  onOpenHelp: () => void;
   onClose: () => void;
   onLogout: () => void;
 };
 
-export const SettingsSheet = ({ lang, setLang, theme, setTheme, onClose, onLogout }: Props) => {
+export const SettingsSheet = ({
+  lang,
+  setLang,
+  theme,
+  setTheme,
+  onOpenHelp,
+  onClose,
+  onLogout,
+}: Props) => {
   const { t } = useT();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -101,6 +110,12 @@ export const SettingsSheet = ({ lang, setLang, theme, setTheme, onClose, onLogou
         />
       </label>
       <p className={styles.sheetHint}>{t('soundCuesHint')}</p>
+
+      <div className={styles.sheetActions}>
+        <button type="button" onClick={onOpenHelp}>
+          ❓ {t('help')}
+        </button>
+      </div>
 
       <h3 className={styles.sheetSubtitle}>{t('changePassword')}</h3>
       <form className={styles.sheetForm} onSubmit={submitPassword}>

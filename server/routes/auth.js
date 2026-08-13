@@ -5,6 +5,7 @@ import db from "../db/index.js";
 import { config } from "../config.js";
 import { signToken, verifyToken } from "../middleware/auth.js";
 import { isValidNewUsername, isPlausibleUsername, isValidPassword } from "../validation.js";
+import { ensureUserList } from "../lists.js";
 
 const router = express.Router();
 
@@ -33,6 +34,7 @@ router.post("/register", async (req, res) => {
     throw err;
   }
 
+  ensureUserList(username);
   res.status(201).json({ token: signToken(username), username });
 });
 
@@ -48,6 +50,8 @@ router.post("/login", async (req, res) => {
     return res.status(401).json({ error: "Invalid credentials" });
   }
 
+  // Accounts made before lists became first-class have no row for their own list.
+  ensureUserList(user.username);
   res.json({ token: signToken(user.username), username: user.username });
 });
 
@@ -88,17 +92,22 @@ router.delete("/account", verifyToken, async (req, res) => {
   }
 
   db.transaction(() => {
-    db.prepare("DELETE FROM items WHERE username = ?").run(username);
-    db.prepare("DELETE FROM history WHERE username = ?").run(username);
-    db.prepare("DELETE FROM list_shares WHERE list_username = ?").run(username);
-    db.prepare("DELETE FROM list_access WHERE list_username = ? OR member = ?").run(
-      username,
-      username,
-    );
-    db.prepare("DELETE FROM push_subscriptions WHERE list_username = ? OR subscriber = ?").run(
-      username,
-      username,
-    );
+    // Every list this account owns goes, not just the one named after them.
+    const owned = db.prepare("SELECT id FROM lists WHERE owner = ?").all(username).map((r) => r.id);
+    const ids = owned.includes(username) ? owned : [...owned, username];
+
+    for (const list of ids) {
+      db.prepare("DELETE FROM items WHERE username = ?").run(list);
+      db.prepare("DELETE FROM history WHERE username = ?").run(list);
+      db.prepare("DELETE FROM list_shares WHERE list_username = ?").run(list);
+      db.prepare("DELETE FROM list_access WHERE list_username = ?").run(list);
+      db.prepare("DELETE FROM push_subscriptions WHERE list_username = ?").run(list);
+    }
+
+    // Memberships and subscriptions this account holds in *other* people's lists.
+    db.prepare("DELETE FROM list_access WHERE member = ?").run(username);
+    db.prepare("DELETE FROM push_subscriptions WHERE subscriber = ?").run(username);
+    db.prepare("DELETE FROM lists WHERE owner = ?").run(username);
     db.prepare("DELETE FROM users WHERE username = ?").run(username);
   })();
 

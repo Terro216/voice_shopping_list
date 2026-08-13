@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { cue } from '../utils/feedback';
+import { mergeTranscript } from '../utils/transcript';
 
 // lib.dom has no SpeechRecognition types; minimal structural typing of what we use.
 type SpeechRecognitionEventLike = {
@@ -38,6 +39,15 @@ const FATAL_ERRORS = new Set(['not-allowed', 'service-not-allowed', 'audio-captu
 
 const RESTART_DELAY_MS = 300;
 
+/**
+ * How long an utterance has to stay quiet before it is acted on. The engine
+ * delivers one phrase as several overlapping "final" results, so they are
+ * merged (see utils/transcript) and applied once, together — that is what turns
+ * «три пакета с маршмеллоу» into one row instead of four. Short enough that
+ * adding something still feels immediate.
+ */
+const SETTLE_MS = 900;
+
 export const useSpeechRecognition = (
   onFinalText: (text: string) => void,
   language: string,
@@ -50,6 +60,10 @@ export const useSpeechRecognition = (
   const isListeningRef = useRef(isListening);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // The utterance being assembled, and the timer that decides it is finished.
+  const utteranceRef = useRef('');
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Latest-ref: handlers below always see the current callback while the
   // recognition instance itself is only re-created on language change.
@@ -67,6 +81,20 @@ export const useSpeechRecognition = (
     isListeningRef.current = isListening;
   }, [isListening]);
 
+  /** Hands the assembled utterance over — once — and starts a fresh one. */
+  const flushUtterance = useCallback(() => {
+    clearTimeout(settleTimerRef.current);
+    const text = utteranceRef.current.trim();
+    utteranceRef.current = '';
+    setInterimText('');
+    if (text) onFinalTextRef.current(text);
+  }, []);
+
+  const flushRef = useRef(flushUtterance);
+  useEffect(() => {
+    flushRef.current = flushUtterance;
+  }, [flushUtterance]);
+
   useEffect(() => {
     const SpeechRecognition = getSpeechRecognition();
     if (!SpeechRecognition) return;
@@ -82,16 +110,21 @@ export const useSpeechRecognition = (
 
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         if (event.results[i].isFinal) {
-          final += event.results[i][0].transcript;
+          final += `${event.results[i][0].transcript} `;
         } else {
-          interim += event.results[i][0].transcript;
+          interim += `${event.results[i][0].transcript} `;
         }
       }
 
-      setInterimText(interim);
+      if (final) utteranceRef.current = mergeTranscript(utteranceRef.current, final);
+
+      // What is on screen is always the whole phrase so far, not just the tail
+      // the engine happens to be working on.
+      setInterimText(`${utteranceRef.current} ${interim.trim()}`.trim());
+
       if (final) {
-        onFinalTextRef.current(final);
-        setInterimText('');
+        clearTimeout(settleTimerRef.current);
+        settleTimerRef.current = setTimeout(() => flushRef.current(), SETTLE_MS);
       }
     };
 
@@ -99,7 +132,8 @@ export const useSpeechRecognition = (
       console.error('Speech recognition error:', event.error);
       if (FATAL_ERRORS.has(event.error)) {
         setIsListening(false);
-        setInterimText('');
+        // Whatever was already understood should still be applied.
+        flushRef.current();
         // The mic button silently going quiet looks like a broken app; say why.
         onFatalErrorRef.current?.(event.error);
       }
@@ -108,6 +142,9 @@ export const useSpeechRecognition = (
     // Chrome stops continuous recognition after silence; restart while the
     // user still wants to listen.
     rec.onend = () => {
+      // The engine stopping *is* the end of the phrase — no need to wait out
+      // the settle timer as well.
+      flushRef.current();
       if (!isListeningRef.current) return;
       restartTimerRef.current = setTimeout(() => {
         if (isListeningRef.current && recognitionRef.current) {
@@ -124,6 +161,8 @@ export const useSpeechRecognition = (
 
     return () => {
       clearTimeout(restartTimerRef.current);
+      clearTimeout(settleTimerRef.current);
+      utteranceRef.current = '';
       rec.onend = null;
       rec.onresult = null;
       rec.onerror = null;
@@ -138,8 +177,9 @@ export const useSpeechRecognition = (
   const toggleListening = useCallback(() => {
     const next = !isListening;
     setIsListening(next);
-    setInterimText('');
     if (next) {
+      utteranceRef.current = '';
+      setInterimText('');
       cue('listenStart');
       try {
         recognitionRef.current?.start();
@@ -149,13 +189,15 @@ export const useSpeechRecognition = (
     } else {
       cue('listenStop');
       clearTimeout(restartTimerRef.current);
+      // Stopping mid-phrase must not throw away what was already understood.
+      flushUtterance();
       try {
         recognitionRef.current?.stop();
       } catch {
         // never started — fine
       }
     }
-  }, [isListening]);
+  }, [isListening, flushUtterance]);
 
   return { isListening, toggleListening, interimText, isSupported };
 };

@@ -178,8 +178,109 @@
 }
 
 .item {
+  position: relative;
   width: 100%;
   border-bottom: 1px solid var(--hairline);
+  /* The swipe hint lives behind the row and must not spill past it. */
+  overflow: hidden;
+}
+
+/* The part that actually moves under a finger. `pan-y` lets the page scroll
+   vertically as usual while horizontal movement is delivered to the row. */
+.itemSurface {
+  position: relative;
+  z-index: 1;
+  background: var(--bg);
+  touch-action: pan-y;
+}
+
+/* Only for springing back after a swipe that did not commit — during the
+   gesture the row has to track the finger exactly. */
+.itemSettling {
+  transition: transform 0.18s ease-out;
+}
+
+.swipeHint {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 1rem;
+  font-size: 1.25rem;
+}
+
+.swipeCheck {
+  justify-content: flex-start;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.swipeDelete {
+  justify-content: flex-end;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.itemSlot {
+  position: relative;
+  width: 100%;
+}
+
+.itemDragging {
+  z-index: 20;
+  border-bottom-color: transparent;
+  /* The row is lifted out of its slot and has to be able to leave it — the
+     clipping that keeps the swipe hint contained would cut it off. */
+  overflow: visible;
+}
+
+.itemDragging .itemSurface {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 18px var(--shadow);
+}
+
+/* While a row is in the air, nothing else should react to a stray touch. */
+.listDragging {
+  user-select: none;
+}
+
+.listDragging .itemMain,
+.listDragging .stepButton {
+  pointer-events: none;
+}
+
+.dropLine {
+  height: 2px;
+  margin: -1px 0;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.dragHandle {
+  flex-shrink: 0;
+  min-width: 36px !important;
+  padding: 0.5rem 0.25rem !important;
+  border: none !important;
+  background: none !important;
+  color: var(--text-faint) !important;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: grab;
+  /* The grip owns its gesture outright, so a drag from here never scrolls. */
+  touch-action: none;
+}
+
+.dragHandle:active {
+  cursor: grabbing;
+}
+
+.reorderHint {
+  margin: 0.6rem 0 0;
+  color: var(--text-faint);
+  font-size: 0.8rem;
 }
 
 .itemRow {
@@ -366,6 +467,12 @@
   cursor: pointer;
   padding: 0 !important;
   font-size: inherit;
+}
+
+/* The whole toast is a dismiss target, so getting one out of the way is a tap
+   anywhere on it rather than a hunt for a close button. */
+.toastShell {
+  cursor: pointer;
 }
 
 .toastWithAction {
@@ -560,6 +667,150 @@
   gap: 0.5rem;
   border-bottom: 1px solid var(--hairline);
   padding-bottom: 0.4rem;
+}
+
+/* ---- the deleted drawer ---- */
+
+.deletedDrawer {
+  width: 100%;
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--hairline);
+  padding-top: 0.5rem;
+  color: var(--text-soft);
+}
+
+.deletedSummary {
+  cursor: pointer;
+  padding: 0.5rem 0;
+  font-size: 0.9rem;
+  color: var(--text-faint);
+  list-style: none;
+}
+
+.deletedSummary::-webkit-details-marker {
+  display: none;
+}
+
+.deletedEmpty {
+  color: var(--text-faint);
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
+.deletedList {
+  list-style: none;
+  margin: 0.25rem 0 0.75rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.deletedList li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--hairline);
+  padding: 0.25rem 0;
+}
+
+.deletedList button {
+  min-height: 36px !important;
+  padding: 0.25rem 0.7rem !important;
+  font-size: 0.85rem !important;
+}
+
+.deletedName {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+/* ---- the list catalog ---- */
+
+.listPickerButton {
+  min-height: 36px !important;
+  padding: 0.3rem 0.7rem !important;
+  font-size: 0.85rem !important;
+  border-radius: 50px !important;
+}
+
+.listCatalog {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.listCatalog li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--hairline);
+  padding-bottom: 0.4rem;
+}
+
+.listCatalogActive .listCatalogName {
+  color: var(--accent) !important;
+  font-weight: 600;
+}
+
+.listCatalogName {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex: 1 1 8rem;
+  min-width: 0;
+  text-align: left;
+  border: none !important;
+  background: none !important;
+  overflow-wrap: anywhere;
+}
+
+.listCatalogOwner {
+  color: var(--text-faint);
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+
+.listCatalogActions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.listCatalogActions button {
+  min-height: 36px !important;
+  padding: 0.25rem 0.7rem !important;
+  font-size: 0.85rem !important;
+}
+
+/* ---- the help sheet ---- */
+
+.helpSection {
+  border-top: 1px solid var(--hairline);
+  padding-top: 0.6rem;
+}
+
+.helpTitle {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+}
+
+.helpText {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--text-soft);
 }
 
 @keyframes pulse {

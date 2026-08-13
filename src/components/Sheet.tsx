@@ -8,18 +8,57 @@ type Props = {
   children: React.ReactNode;
 };
 
-/** Modal panel used by the share and settings screens. */
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Modal panel used by the share, settings, help and list screens. */
 export const Sheet = ({ title, onClose, children }: Props) => {
   const { t } = useT();
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    panelRef.current?.focus();
+    const panel = panelRef.current;
+    // Whatever opened the sheet gets the focus back when it closes, so a
+    // keyboard or screen-reader user is not dumped at the top of the page.
+    const opener = document.activeElement as HTMLElement | null;
+    panel?.focus();
+
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab' || !panel) return;
+
+      // Keep Tab inside the panel: a modal whose focus wanders behind it lets
+      // people type into a list they cannot see.
+      const targets = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+        (node) => node.offsetParent !== null || node === document.activeElement,
+      );
+      if (targets.length === 0) {
+        e.preventDefault();
+        panel.focus();
+        return;
+      }
+
+      const first = targets[0];
+      const last = targets[targets.length - 1];
+      const active = document.activeElement;
+
+      if (e.shiftKey && (active === first || active === panel || !panel.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
+
     document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      opener?.focus?.();
+    };
   }, [onClose]);
 
   return (
