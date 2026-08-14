@@ -8,6 +8,8 @@ type Props = {
   lang: Lang;
   setLang: (lang: Lang) => void;
   interimText: string;
+  /** Ends the phrase now and keeps listening. */
+  flushNow: () => void;
 };
 
 export const VoiceControls = ({
@@ -17,6 +19,7 @@ export const VoiceControls = ({
   lang,
   setLang,
   interimText,
+  flushNow,
 }: Props) => {
   const { t } = useT();
 
@@ -37,6 +40,15 @@ export const VoiceControls = ({
       >
         {isListening ? t('listening') : t('startVoice')}
       </button>
+
+      {/* Waiting out the silence detector after every item is the slow part of
+          dictating a list; this ends the phrase at once and keeps the mic on.
+          Saying "дальше" does the same thing without reaching for the screen. */}
+      {isListening && (
+        <button type="button" className={styles.nextButton} onClick={flushNow}>
+          {t('nextPhrase')}
+        </button>
+      )}
 
       <select
         value={lang}

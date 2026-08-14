@@ -59,6 +59,35 @@ describe('speechParser', () => {
     expect(parseSpeechText('добавь пожалуйста')).toEqual([]);
   });
 
+  it('splits a run of "name number" pairs said in one breath', () => {
+    // Read as one item, this used to become «молоко 4 хлеб» ×2.
+    expect(parseSpeechText('молоко 4 хлеб 2')).toEqual([
+      { name: 'молоко', count: 4 },
+      { name: 'хлеб', count: 2 },
+    ]);
+  });
+
+  it('handles leading counts run together', () => {
+    expect(parseSpeechText('2 молока 3 хлеба')).toEqual([
+      { name: 'молока', count: 2 },
+      { name: 'хлеба', count: 3 },
+    ]);
+  });
+
+  it('lets a trailing name without a number stand on its own', () => {
+    expect(parseSpeechText('молоко 4 хлеб')).toEqual([
+      { name: 'молоко', count: 4 },
+      { name: 'хлеб', count: 1 },
+    ]);
+  });
+
+  it('still keeps a measurement inside the name', () => {
+    expect(parseSpeechText('500 грамм сыра и молоко 2')).toEqual([
+      { name: '500 грамм сыра', count: 1 },
+      { name: 'молоко', count: 2 },
+    ]);
+  });
+
   it('a bare number stays a name, not a count', () => {
     expect(parseSpeechText('2')).toEqual([{ name: '2', count: 1 }]);
   });

@@ -76,16 +76,34 @@ export const ItemRow = ({
 
   const gesture = useRef({ id: -1, x0: 0, y0: 0, axis: null as Axis, width: 1, armed: false });
 
+  const editorRef = useRef<HTMLFormElement>(null);
+
   const openEditor = () => {
     setNameDraft(item.name);
     setNoteDraft(item.note ?? '');
     setEditing(true);
   };
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const save = () => {
     onEdit(item.id, { name: nameDraft, note: noteDraft });
     setEditing(false);
+  };
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    save();
+  };
+
+  /**
+   * Tapping away from the editor keeps the edit. Typing a note and then
+   * touching anything else is how people leave a form they consider finished —
+   * treating that as "discard" threw the note away without a word. Escape is
+   * the way out for anyone who wants one.
+   */
+  const onEditorBlur = (e: React.FocusEvent<HTMLFormElement>) => {
+    const goingTo = e.relatedTarget as Node | null;
+    if (goingTo && editorRef.current?.contains(goingTo)) return; // moved between fields
+    save();
   };
 
   const commitThreshold = () =>
@@ -271,7 +289,18 @@ export const ItemRow = ({
         </div>
 
         {editing && (
-          <form className={styles.itemEditor} onSubmit={submit}>
+          <form
+            ref={editorRef}
+            className={styles.itemEditor}
+            onSubmit={submit}
+            onBlur={onEditorBlur}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation();
+                setEditing(false);
+              }
+            }}
+          >
             <input
               value={nameDraft}
               onChange={(e) => setNameDraft(e.target.value)}

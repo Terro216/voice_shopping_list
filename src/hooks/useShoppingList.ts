@@ -31,6 +31,7 @@ import {
   syncOfflineQueue,
 } from '../api/offlineQueue';
 import { ApiError, CLIENT_ID, getToken, notifyAuthExpired } from '../api/client';
+import { sameName } from '../utils/wordForms';
 import { useT } from '../i18n';
 
 const MAX_COUNT = 999;
@@ -343,9 +344,12 @@ export const useShoppingList = (list: string, viewer: string) => {
       if (!trimmed) return;
 
       // Saying "молоко" twice should bump the existing entry, not duplicate it.
-      const existing = itemsRef.current.find(
-        (item) => item.name.toLowerCase() === trimmed.toLowerCase(),
-      );
+      // Dictation rarely repeats a word in the same grammatical form, so a
+      // near-match on the ending counts too — «молоко 4» then «два молока» is
+      // one product, and used to become two rows. An exact match still wins.
+      const existing =
+        itemsRef.current.find((item) => item.name.toLowerCase() === trimmed.toLowerCase()) ??
+        itemsRef.current.find((item) => sameName(item.name, trimmed));
       if (existing) {
         if (existing.bought) {
           // Re-adding something already checked off puts it back on the list.

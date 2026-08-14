@@ -121,12 +121,15 @@
   font-size: 0.85rem;
 }
 
-/* Stays pinned while the list scrolls, so the mic is always reachable. */
+/* Stays pinned while the list scrolls, so the mic is always reachable. Wraps
+   for the same reason the header does: four controls do not fit across a phone,
+   and the ones that overflow are invisible rather than merely cramped. */
 .voiceControls {
   position: sticky;
   top: 0;
   z-index: 10;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.6rem;
   margin-bottom: 1rem;
@@ -150,6 +153,15 @@
   border-color: var(--danger) !important;
   color: var(--accent-contrast);
   animation: pulse 1.5s infinite;
+}
+
+.nextButton {
+  border-radius: 50px !important;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--accent-soft) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
 }
 
 .interimText {
@@ -291,12 +303,6 @@
   height: 16px;
   display: block;
   pointer-events: none;
-}
-
-.reorderHint {
-  margin: 0.6rem 0 0;
-  color: var(--text-faint);
-  font-size: 0.8rem;
 }
 
 .itemRow {

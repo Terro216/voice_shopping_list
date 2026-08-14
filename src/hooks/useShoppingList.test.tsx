@@ -191,3 +191,33 @@ describe('useShoppingList deleted drawer', () => {
     expect(result.current.deletedItems.map((i) => i.name)).toEqual(['молоко']);
   });
 });
+
+describe('useShoppingList adding', () => {
+  it('bumps the existing row when the same thing is said in another form', async () => {
+    const { result } = await mountLoaded();
+    await act(async () => {
+      await result.current.addItem('молоко', 4);
+      await result.current.addItem('молока', 2);
+    });
+
+    // «молоко 4» then «два молока» is one product said twice, not two rows.
+    expect(result.current.items).toHaveLength(1);
+    expect(result.current.items[0]).toMatchObject({ name: 'молоко', count: 6 });
+  });
+
+  it('still keeps genuinely different things apart', async () => {
+    const { result } = await mountLoaded();
+    await act(async () => {
+      await result.current.addItem('сыр');
+      await result.current.addItem('сырок');
+      await result.current.addItem('молоко');
+      await result.current.addItem('молоко безлактозное');
+    });
+    expect(result.current.items.map((i) => i.name)).toEqual([
+      'сыр',
+      'сырок',
+      'молоко',
+      'молоко безлактозное',
+    ]);
+  });
+});

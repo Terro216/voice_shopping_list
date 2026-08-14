@@ -43,10 +43,28 @@ const RESTART_DELAY_MS = 300;
  * How long an utterance has to stay quiet before it is acted on. The engine
  * delivers one phrase as several overlapping "final" results, so they are
  * merged (see utils/transcript) and applied once, together — that is what turns
- * «три пакета с маршмеллоу» into one row instead of four. Short enough that
- * adding something still feels immediate.
+ * «три пакета с маршмеллоу» into one row instead of four.
+ *
+ * It is a compromise: long enough to catch a revised take, short enough that
+ * dictating a list does not feel like waiting. Anyone who finds it slow can say
+ * "дальше" (or press the button) and not wait at all.
  */
-const SETTLE_MS = 900;
+const SETTLE_MS = 550;
+
+/**
+ * Spoken full stop. Ends the phrase at once and leaves the mic listening, so a
+ * long list can be dictated at speaking pace instead of at the pace of the
+ * silence detector.
+ */
+const TERMINATORS = ['дальше', 'далее', 'следующее', 'next'];
+
+const endsWithTerminator = (text: string) => {
+  const words = text.toLowerCase().replace(/[.,!?;:…]/g, '').split(/\s+/);
+  return TERMINATORS.includes(words[words.length - 1]);
+};
+
+const dropTerminator = (text: string) =>
+  text.replace(/\s*[^\s]+\s*[.,!?;:…]*$/, '').trim();
 
 export const useSpeechRecognition = (
   onFinalText: (text: string) => void,
@@ -117,6 +135,14 @@ export const useSpeechRecognition = (
       }
 
       if (final) utteranceRef.current = mergeTranscript(utteranceRef.current, final);
+
+      // "…и хлеб — дальше" means the phrase is over; take it now rather than
+      // sitting out the silence timer.
+      if (final && endsWithTerminator(utteranceRef.current)) {
+        utteranceRef.current = dropTerminator(utteranceRef.current);
+        flushRef.current();
+        return;
+      }
 
       // What is on screen is always the whole phrase so far, not just the tail
       // the engine happens to be working on.
@@ -214,5 +240,5 @@ export const useSpeechRecognition = (
     }
   }, [isListening, flushUtterance]);
 
-  return { isListening, toggleListening, interimText, isSupported };
+  return { isListening, toggleListening, interimText, isSupported, flushNow: flushUtterance };
 };

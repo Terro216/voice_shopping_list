@@ -73,22 +73,49 @@ const parseCountToken = (token: string): number | null => {
   return value;
 };
 
-const parseSegment = (segment: string): ParsedItem | null => {
+/**
+ * One run of speech between separators, which may still hold several items:
+ * people dictate «молоко 4 хлеб 2» in one breath, without an "and" anywhere.
+ * Read as a single item that used to become «молоко 4 хлеб» ×2.
+ *
+ * A number is read as belonging to the name it touches: before a name it
+ * counts that name, after one it closes it. A name already carrying a leading
+ * count is finished by the next number, which then starts the item after it.
+ */
+const parseSegmentItems = (segment: string): ParsedItem[] => {
   const tokens = segment.split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return null;
+  if (tokens.length === 0) return [];
+  // A segment that is nothing but a number is a name: saying «2» on its own
+  // asks for an item called «2», not for a quantity of nothing.
+  if (tokens.length === 1) return [{ name: tokens[0], count: 1 }];
 
-  if (tokens.length > 1) {
-    const leading = parseCountToken(tokens[0]);
-    if (leading !== null) {
-      return { name: tokens.slice(1).join(' '), count: leading };
+  const items: ParsedItem[] = [];
+  let words: string[] = [];
+  let leading: number | null = null;
+
+  for (const token of tokens) {
+    const count = parseCountToken(token);
+    if (count === null) {
+      words.push(token);
+      continue;
     }
-    const trailing = parseCountToken(tokens[tokens.length - 1]);
-    if (trailing !== null) {
-      return { name: tokens.slice(0, -1).join(' '), count: trailing };
+    if (words.length === 0) {
+      leading = count; // nothing to attach it to yet — it counts what follows
+      continue;
     }
+    items.push({ name: words.join(' '), count: leading ?? count });
+    words = [];
+    leading = leading === null ? null : count;
   }
 
-  return { name: tokens.join(' '), count: 1 };
+  if (words.length > 0) {
+    items.push({ name: words.join(' '), count: leading ?? 1 });
+  } else if (items.length === 0) {
+    // Numbers and nothing else: keep the words rather than drop the utterance.
+    return [{ name: tokens.join(' '), count: 1 }];
+  }
+
+  return items;
 };
 
 export const parseSpeechText = (text: string): ParsedItem[] => {
@@ -101,10 +128,7 @@ export const parseSpeechText = (text: string): ParsedItem[] => {
     cleaned = cleaned.replace(new RegExp(`(^|\\s)${word}(?=\\s|$)`, 'gu'), ' ');
   }
 
-  return cleaned
-    .split(SEPARATOR_RE)
-    .map(parseSegment)
-    .filter((item): item is ParsedItem => item !== null);
+  return cleaned.split(SEPARATOR_RE).flatMap(parseSegmentItems);
 };
 
 // Bullets and numbering people paste along with their lists.

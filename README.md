@@ -11,12 +11,17 @@ Express 5 + SQLite (better-sqlite3) + Socket.IO on the backend.
   ×2 instead of two rows. An utterance is assembled before it is acted on:
   engines re-deliver a *growing prefix* of the same phrase as several "final"
   results, and taking each at face value turned «три пакета с маршмеллоу» into
-  four half-parsed rows (see `utils/transcript`).
-- **Gestures**: swipe a row right to check it off, left to delete; hold the ⠿
-  grip and drag to arrange the list in the order the shop is walked. A drag can
-  only start from the grip and a swipe only wins once it clearly beats the
-  vertical axis, so scrolling a long list never disturbs it. Arrow keys on a
-  focused grip do the same reordering without a touchscreen.
+  four half-parsed rows (see `utils/transcript`). Fragments are compared
+  allowing for a changed ending, because the engine re-delivers what it heard
+  inflected differently — «молоко» comes back as «молока». Saying "дальше" (or
+  pressing ⏎ Дальше) ends a phrase at once instead of waiting out the pause,
+  and a run like «молоко 4 хлеб 2» becomes two items rather than one.
+- **Gestures**: swipe a row right to check it off, left to delete; hold the
+  drawn grip on the left of a row and drag to arrange the list in the order the
+  shop is walked. A drag can only start from the grip and a swipe only wins once
+  it clearly beats the vertical axis, so scrolling a long list never disturbs
+  it. Arrow keys on a focused grip do the same reordering without a touchscreen.
+  Editing a row keeps what was typed when focus leaves it — Escape discards.
 - **Several named lists**: an account keeps as many as it likes ("Продукты",
   "Дача"), each with its own items, history, members and invite link. The first
   list keeps `id = username`, so links handed out before this existed still work.
@@ -140,8 +145,12 @@ npm run build             # tsc + vite build (output in dist/, served by server)
 - The undo stack is per device. Undo reverses what *this* phone did, which is
   usually what is wanted, but it cannot take back a collaborator's change.
 - The deleted drawer keeps 30 days and shows the 50 most recent entries.
-- Dictation waits ~0.9 s of silence before applying a phrase. That delay is what
-  lets the overlapping "final" results be merged into one utterance.
+- Dictation waits ~0.55 s of silence before applying a phrase; that delay is
+  what lets the overlapping "final" results be merged into one utterance. Saying
+  "дальше" skips it.
+- Item names are merged across grammatical forms («молоко» absorbs «молока»)
+  but never across a qualifier: «молоко» and «молоко безлактозное» stay two
+  rows, as do «сыр» and «сырок».
 
 ## Backups
 

@@ -12,31 +12,14 @@
  * merged here first and the utterance is only acted on once it has settled.
  */
 
+import { sameWord } from './wordForms';
+
 const clean = (text: string) => text.replace(/\s+/g, ' ').trim();
 
 /** Case- and punctuation-insensitive form used only for comparing fragments. */
 const key = (text: string) => text.toLowerCase().replace(/[.,!?;:…]/g, '');
 
 const words = (text: string) => (text ? key(text).split(' ') : []);
-
-/**
- * Are these two the same word, allowing for the engine changing its mind about
- * the ending? A revised take routinely comes back inflected differently —
- * «молоко» becomes «молока», «хлеб» becomes «хлеба» — and comparing the exact
- * strings made the revision look like a second, different item.
- *
- * Deliberately narrow: the two have to agree on everything but the last letter
- * or two, so «молоко» and «молоток» stay separate words.
- */
-const sameWord = (a: string, b: string) => {
-  if (a === b) return true;
-  const shorter = Math.min(a.length, b.length);
-  if (shorter < 3 || Math.abs(a.length - b.length) > 2) return false;
-
-  let common = 0;
-  while (common < shorter && a[common] === b[common]) common++;
-  return common >= shorter - 1;
-};
 
 /** Does `text` open with the words of `head`? */
 const startsWith = (text: string[], head: string[]) =>

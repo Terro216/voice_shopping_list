@@ -230,11 +230,8 @@ export const ShoppingList = ({
   );
 
   const speechLang = LANGUAGES.find((option) => option.lang === lang)?.speech ?? 'ru-RU';
-  const { isListening, toggleListening, interimText, isSupported } = useSpeechRecognition(
-    handleSpeech,
-    speechLang,
-    onSpeechError,
-  );
+  const { isListening, toggleListening, interimText, isSupported, flushNow } =
+    useSpeechRecognition(handleSpeech, speechLang, onSpeechError);
 
   // Keep the phone awake while dictating in the store.
   useWakeLock(isListening);
@@ -439,6 +436,7 @@ export const ShoppingList = ({
         lang={lang}
         setLang={setLang}
         interimText={interimText}
+        flushNow={flushNow}
       />
 
       <form className={styles.form} onSubmit={handleManualAdd}>
@@ -490,8 +488,6 @@ export const ShoppingList = ({
           </div>
         ))}
         {dropIndex === activeItems.length && <div className={styles.dropLine} aria-hidden="true" />}
-
-        {activeItems.length > 1 && <p className={styles.reorderHint}>{t('reorderHint')}</p>}
 
         {boughtItems.length > 0 && (
           <>

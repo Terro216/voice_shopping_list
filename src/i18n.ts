@@ -57,7 +57,7 @@ const ru = {
 
   dragHandle: 'Переместить: {name}',
   orderLabel: 'порядок',
-  reorderHint: 'Держите точки слева от позиции и тяните — список встанет в порядке обхода магазина.',
+  nextPhrase: '⏎ Дальше',
 
   viewing: 'смотрят',
   emptyList: 'Список пуст — надиктуйте или введите, что купить.',
@@ -148,7 +148,7 @@ const ru = {
   help: 'Как пользоваться',
   helpIntro: 'Список живёт в вашем телефоне и в телефонах тех, кому вы дали ссылку. Всё сохраняется само.',
   helpVoiceTitle: '🎤 Голос',
-  helpVoiceText: 'Нажмите «Говорить» и скажите, что купить: «молоко, два хлеба и пачка масла». Пока горит кнопка, можно говорить сколько угодно — каждая фраза добавляется отдельно. Кнопка выключает микрофон.',
+  helpVoiceText: 'Нажмите «Говорить» и скажите, что купить: «молоко, два хлеба и пачка масла». Пока горит кнопка, можно говорить сколько угодно — каждая фраза добавляется отдельно. Чтобы не ждать паузу, скажите «дальше» или нажмите «⏎ Дальше». Кнопка с микрофоном выключает запись.',
   helpCommandsTitle: '🗣 Команды голосом',
   helpCommandsText: '«вычеркни молоко» — отметить купленным. «удали хлеб» — убрать из списка. «очисти купленное» — убрать всё отмеченное. «отмена» — вернуть как было.',
   helpGesturesTitle: '👆 Жесты',
@@ -220,7 +220,7 @@ const en: Record<keyof typeof ru, string> = {
 
   dragHandle: 'Move: {name}',
   orderLabel: 'order',
-  reorderHint: 'Hold the dots on the left of a row and drag to arrange the list in the order you walk the shop.',
+  nextPhrase: '⏎ Next',
 
   viewing: 'viewing',
   emptyList: 'The list is empty — dictate or type something to buy.',
@@ -311,7 +311,7 @@ const en: Record<keyof typeof ru, string> = {
   help: 'How it works',
   helpIntro: 'The list lives on your phone and on the phones of everyone you shared the link with. It saves itself.',
   helpVoiceTitle: '🎤 Voice',
-  helpVoiceText: 'Press "Start voice" and say what to buy: "milk, two loaves and a pack of butter". While the button glows you can keep talking — each phrase is added on its own. Press it again to stop.',
+  helpVoiceText: 'Press "Start voice" and say what to buy: "milk, two loaves and a pack of butter". While the button glows you can keep talking — each phrase is added on its own. To skip the pause, say “next” or press “⏎ Next”. Press the mic button again to stop.',
   helpCommandsTitle: '🗣 Spoken commands',
   helpCommandsText: '"check off milk" marks it bought. "remove bread" takes it off the list. "clear bought" empties the cart. "undo" puts the last change back.',
   helpGesturesTitle: '👆 Gestures',

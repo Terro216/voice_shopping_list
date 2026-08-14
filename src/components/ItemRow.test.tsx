@@ -108,6 +108,36 @@ describe('ItemRow gestures', () => {
     expect(handlers.onRemove).not.toHaveBeenCalled();
   });
 
+  it('keeps a note when focus leaves the editor', () => {
+    const { handlers } = setup();
+    fireEvent.click(screen.getByLabelText(/Изменить|^Edit$/));
+
+    const note = screen.getByLabelText(/Заметка|Note:/);
+    fireEvent.change(note, { target: { value: 'тот, в красной пачке' } });
+
+    // Tapping the page rather than "Сохранить" is how people leave a form they
+    // consider finished; it used to discard the note without a word.
+    fireEvent.blur(note, { relatedTarget: null });
+
+    expect(handlers.onEdit).toHaveBeenCalledWith('i1', {
+      name: 'молоко',
+      note: 'тот, в красной пачке',
+    });
+    expect(screen.queryByLabelText(/Заметка|Note:/)).toBeNull();
+  });
+
+  it('does not save while focus is still moving inside the editor', () => {
+    const { handlers } = setup();
+    fireEvent.click(screen.getByLabelText(/Изменить|^Edit$/));
+
+    const name = screen.getByLabelText(/Название позиции|Item name/);
+    const note = screen.getByLabelText(/Заметка|Note:/);
+    fireEvent.blur(name, { relatedTarget: note });
+
+    expect(handlers.onEdit).not.toHaveBeenCalled();
+    expect(note).toBeTruthy();
+  });
+
   it('still checks off on a plain tap', () => {
     const { handlers } = setup();
     fireEvent.click(screen.getByLabelText(/Отметить купленным|Mark as bought/));
