@@ -77,7 +77,16 @@ describe('App', () => {
     expect(guide.textContent).toContain('Как пользоваться');
 
     fireEvent.click(guide);
-    expect(await screen.findByRole('dialog', { name: 'Как пользоваться' })).toBeTruthy();
+    const sheet = await screen.findByRole('dialog', { name: 'Как пользоваться' });
+    expect(sheet).toBeTruthy();
+
+    // The guide has to describe what the app actually does now, so the things
+    // most recently changed are the ones worth asserting.
+    expect(sheet.textContent).toContain('дальше');
+    expect(sheet.textContent).toContain('молоко 4 хлеб 2');
+    expect(sheet.textContent).toContain('точки слева');
+    expect(sheet.textContent).toContain('Escape');
+    expect(sheet.textContent).not.toContain('⠿');
   });
 
   it('opens the instructions on the very first visit', async () => {

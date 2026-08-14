@@ -6,10 +6,14 @@ type Props = {
   onClose: () => void;
 };
 
+// Ordered the way somebody meeting the app needs it: talk to it, say how many,
+// correct what it heard, then the rest.
 const SECTIONS: { title: TranslationKey; body: TranslationKey }[] = [
   { title: 'helpVoiceTitle', body: 'helpVoiceText' },
+  { title: 'helpCountsTitle', body: 'helpCountsText' },
   { title: 'helpCommandsTitle', body: 'helpCommandsText' },
   { title: 'helpGesturesTitle', body: 'helpGesturesText' },
+  { title: 'helpEditTitle', body: 'helpEditText' },
   { title: 'helpListsTitle', body: 'helpListsText' },
   { title: 'helpShareTitle', body: 'helpShareText' },
   { title: 'helpOfflineTitle', body: 'helpOfflineText' },
