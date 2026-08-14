@@ -14,7 +14,7 @@ const item: Item = {
   name: 'молоко',
   note: null,
   count: 1,
-  username: 'u',
+  list_id: 'u',
   bought: false,
   bought_at: null,
 };

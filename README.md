@@ -102,12 +102,15 @@ token (`?join=TOKEN`). The owner can revoke a member or rotate the token, which
 invalidates every copy of the old link. The same check gates Socket.IO rooms and
 push subscriptions.
 
-Historical note, because it explains the column and parameter names: lists used
-to *be* their owner's username. An account's first list still has `id =
-username`, and `items.username`, `history.username`, `list_access.list_username`
-and the `?username=` API parameter all mean "the list id". Keeping that spelling
-is what let invite links, cached snapshots and queued offline mutations from
-before the change keep working without a data migration.
+Lists used to *be* their owner's username, and everything that referenced one
+was named accordingly until migration 007 renamed the columns to `list_id` and
+the API parameter to `list`. An account's first list still has `id = username`,
+which is what let invite links handed out before lists had names keep working.
+
+The API also still answers to `username` as a name for the `list` parameter, and
+snapshots stored under the old shape are read back. Both exist for one reason:
+a phone that queued mutations offline before the rename — or updated while in a
+shop with no signal — has to be able to replay them and open onto its list.
 
 ## Development
 
@@ -121,7 +124,8 @@ npm run dev               # Vite on :5173, proxies /api and /socket.io to :3000
 Tests and checks:
 
 ```bash
-npm test                  # vitest: parsers, offline queue, swipe gestures, app render
+npm test                  # vitest: parsers, offline queue, undo across reloads,
+                          # swipe and drag gestures, list cache, app render
 npm run lint
 npm run smoke             # boots the real server, exercises the API and sockets
 npm run build             # tsc + vite build (output in dist/, served by server)

@@ -24,7 +24,14 @@ export const readSnapshot = (list: string): Snapshot | null => {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.items)) return null;
-    return { items: parsed.items as Item[], savedAt: Number(parsed.savedAt) || 0 };
+    // Snapshots written before the column rename call the list `username`.
+    // Reading them is what keeps a phone that updates offline, in a shop, from
+    // opening onto an empty list.
+    const items = (parsed.items as (Item & { username?: string })[]).map((item) => ({
+      ...item,
+      list_id: item.list_id ?? item.username ?? list,
+    }));
+    return { items, savedAt: Number(parsed.savedAt) || 0 };
   } catch {
     return null;
   }

@@ -45,6 +45,7 @@ const ru = {
   listDeleted: 'Список «{name}» удалён',
   mainListNote: 'Главный список удалить нельзя',
   sharedByOwner: 'от {owner}',
+  listLimitReached: 'Больше списков создать нельзя — удалите ненужный',
 
   deletedTitle: 'Удалённое',
   deletedHint: 'Удалённое хранится 30 дней — можно вернуть.',
@@ -207,6 +208,7 @@ const en: Record<keyof typeof ru, string> = {
   listDeleted: 'List “{name}” deleted',
   mainListNote: 'Your main list cannot be deleted',
   sharedByOwner: 'from {owner}',
+  listLimitReached: 'No more lists can be created — delete one you do not need',
 
   deletedTitle: 'Deleted',
   deletedHint: 'Deleted items are kept for 30 days — you can put them back.',

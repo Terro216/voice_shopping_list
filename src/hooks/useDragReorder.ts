@@ -24,6 +24,13 @@ const AUTOSCROLL_SPEED_PX = 12;
 
 type Band = { id: string; top: number; height: number };
 
+/**
+ * Landing on your own slot — or on the gap immediately after it — puts the row
+ * exactly where it already was. Both the drop line and the commit ask this, so
+ * "no line was shown" and "nothing was sent" can never disagree.
+ */
+const isSamePlace = (target: number, from: number) => target === from || target === from + 1;
+
 export const useDragReorder = (ids: string[], onCommit: (ids: string[]) => void) => {
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState(0);
@@ -72,7 +79,7 @@ export const useDragReorder = (ids: string[], onCommit: (ids: string[]) => void)
     if (!state) return;
 
     const target = targetIndexRef.current;
-    if (commit && target !== null && target !== state.from) {
+    if (commit && target !== null && !isSamePlace(target, state.from)) {
       const next = idsRef.current.filter((id) => id !== state.id);
       // `target` counts positions in the original list; removing the dragged row
       // shifts everything after it up by one.
@@ -106,7 +113,7 @@ export const useDragReorder = (ids: string[], onCommit: (ids: string[]) => void)
 
     const target = computeTarget(state);
     targetIndexRef.current = target;
-    setDropIndex(target === state.from || target === state.from + 1 ? null : target);
+    setDropIndex(isSamePlace(target, state.from) ? null : target);
   }, []);
 
   const startDrag = useCallback(

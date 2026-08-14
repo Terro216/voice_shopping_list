@@ -7,8 +7,8 @@ export type Item = {
   /** Which one to grab: "тот, в красной пачке". */
   note?: string | null;
   count: number;
-  /** The list this belongs to. Named `username` because a list used to be one. */
-  username: string;
+  /** The list this belongs to. */
+  list_id: string;
   bought: boolean;
   bought_at?: number | null;
   /** Manual order among the active items; rewritten by dragging a row. */
@@ -55,48 +55,51 @@ const sendOrQueue = async (url: string, method: string, body?: unknown): Promise
   }
 };
 
-export const fetchItems = (username: string): Promise<Item[]> =>
-  request<Item[]>(`/api/items?username=${encodeURIComponent(username)}`);
+export const fetchItems = (list: string): Promise<Item[]> =>
+  request<Item[]>(`/api/items?list=${encodeURIComponent(list)}`);
 
-export const fetchSuggestions = (username: string, q = ''): Promise<Suggestion[]> =>
+export const fetchSuggestions = (list: string, q = ''): Promise<Suggestion[]> =>
   request<Suggestion[]>(
-    `/api/items/suggestions?username=${encodeURIComponent(username)}&q=${encodeURIComponent(q)}`,
+    `/api/items/suggestions?list=${encodeURIComponent(list)}&q=${encodeURIComponent(q)}`,
   );
 
-export const createItem = (item: Item): Promise<void> => sendOrQueue('/api/items', 'POST', item);
+// The row carries its list as `list_id`; on the wire the parameter naming the
+// list is `list`, the same as on every other endpoint.
+export const createItem = ({ list_id, ...item }: Item): Promise<void> =>
+  sendOrQueue('/api/items', 'POST', { ...item, list: list_id });
 
-export const changeItemCount = (id: string, username: string, delta: number): Promise<void> =>
-  sendOrQueue(`/api/items/${encodeURIComponent(id)}/count`, 'PATCH', { username, delta });
+export const changeItemCount = (id: string, list: string, delta: number): Promise<void> =>
+  sendOrQueue(`/api/items/${encodeURIComponent(id)}/count`, 'PATCH', { list, delta });
 
-export const updateItem = (id: string, username: string, edit: ItemEdit): Promise<void> =>
-  sendOrQueue(`/api/items/${encodeURIComponent(id)}`, 'PATCH', { username, ...edit });
+export const updateItem = (id: string, list: string, edit: ItemEdit): Promise<void> =>
+  sendOrQueue(`/api/items/${encodeURIComponent(id)}`, 'PATCH', { list, ...edit });
 
-export const setItemBought = (id: string, username: string, bought: boolean): Promise<void> =>
-  sendOrQueue(`/api/items/${encodeURIComponent(id)}/bought`, 'PATCH', { username, bought });
+export const setItemBought = (id: string, list: string, bought: boolean): Promise<void> =>
+  sendOrQueue(`/api/items/${encodeURIComponent(id)}/bought`, 'PATCH', { list, bought });
 
-export const clearBoughtItems = (username: string): Promise<void> =>
-  sendOrQueue(`/api/items/bought?username=${encodeURIComponent(username)}`, 'DELETE');
+export const clearBoughtItems = (list: string): Promise<void> =>
+  sendOrQueue(`/api/items/bought?list=${encodeURIComponent(list)}`, 'DELETE');
 
-export const deleteItem = (id: string, username: string): Promise<void> =>
+export const deleteItem = (id: string, list: string): Promise<void> =>
   sendOrQueue(
-    `/api/items/${encodeURIComponent(id)}?username=${encodeURIComponent(username)}`,
+    `/api/items/${encodeURIComponent(id)}?list=${encodeURIComponent(list)}`,
     'DELETE',
   );
 
 /** Items in the list's "deleted" drawer, most recently removed first. */
-export const fetchDeletedItems = (username: string): Promise<Item[]> =>
-  request<Item[]>(`/api/items/deleted?username=${encodeURIComponent(username)}`);
+export const fetchDeletedItems = (list: string): Promise<Item[]> =>
+  request<Item[]>(`/api/items/deleted?list=${encodeURIComponent(list)}`);
 
-export const restoreItem = (id: string, username: string): Promise<void> =>
-  sendOrQueue(`/api/items/${encodeURIComponent(id)}/restore`, 'POST', { username });
+export const restoreItem = (id: string, list: string): Promise<void> =>
+  sendOrQueue(`/api/items/${encodeURIComponent(id)}/restore`, 'POST', { list });
 
-export const purgeDeletedItems = (username: string): Promise<void> =>
-  sendOrQueue(`/api/items/deleted?username=${encodeURIComponent(username)}`, 'DELETE');
+export const purgeDeletedItems = (list: string): Promise<void> =>
+  sendOrQueue(`/api/items/deleted?list=${encodeURIComponent(list)}`, 'DELETE');
 
 /**
  * Rewrites the manual order. The whole visible order is sent, not a move, so a
  * request that gets replayed late cannot shuffle the list into something the
  * user never asked for — it is simply out of date and harmless.
  */
-export const reorderItems = (username: string, ids: string[]): Promise<void> =>
-  sendOrQueue('/api/items/order', 'PUT', { username, ids });
+export const reorderItems = (list: string, ids: string[]): Promise<void> =>
+  sendOrQueue('/api/items/order', 'PUT', { list, ids });

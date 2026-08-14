@@ -8,17 +8,17 @@ const TYPEAHEAD_DEBOUNCE_MS = 250;
  * the user is typing (≥2 chars, debounced). Both fail silently to empty — the
  * feature should never get in the way.
  */
-export const useSuggestions = (username: string, query: string) => {
+export const useSuggestions = (list: string, query: string) => {
   const [frequent, setFrequent] = useState<Suggestion[]>([]);
   const [matches, setMatches] = useState<Suggestion[]>([]);
 
   const refreshFrequent = useCallback(async () => {
     try {
-      setFrequent(await fetchSuggestions(username));
+      setFrequent(await fetchSuggestions(list));
     } catch {
       setFrequent([]);
     }
-  }, [username]);
+  }, [list]);
 
   useEffect(() => {
     refreshFrequent();
@@ -32,13 +32,13 @@ export const useSuggestions = (username: string, query: string) => {
     }
     const timer = setTimeout(async () => {
       try {
-        setMatches(await fetchSuggestions(username, q));
+        setMatches(await fetchSuggestions(list, q));
       } catch {
         setMatches([]);
       }
     }, TYPEAHEAD_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [username, query]);
+  }, [list, query]);
 
   return { frequent, matches, refreshFrequent };
 };

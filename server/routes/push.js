@@ -36,11 +36,11 @@ router.post("/subscribe", verifyToken, writeLimiter, (req, res) => {
   }
 
   db.prepare(
-    `INSERT INTO push_subscriptions (endpoint, subscriber, list_username, p256dh, auth)
+    `INSERT INTO push_subscriptions (endpoint, subscriber, list_id, p256dh, auth)
      VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(endpoint) DO UPDATE SET
        subscriber = excluded.subscriber,
-       list_username = excluded.list_username,
+       list_id = excluded.list_id,
        p256dh = excluded.p256dh,
        auth = excluded.auth`,
   ).run(
@@ -71,9 +71,9 @@ router.get("/status", verifyToken, readLimiter, (req, res) => {
   if (typeof endpoint !== "string") return res.status(400).json({ error: "Invalid endpoint" });
 
   const row = db
-    .prepare("SELECT list_username FROM push_subscriptions WHERE endpoint = ? AND subscriber = ?")
+    .prepare("SELECT list_id FROM push_subscriptions WHERE endpoint = ? AND subscriber = ?")
     .get(endpoint, req.user.username);
-  res.json({ list: row?.list_username ?? null });
+  res.json({ list: row?.list_id ?? null });
 });
 
 export default router;

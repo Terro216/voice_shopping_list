@@ -11,8 +11,8 @@ import {
 } from "../validation.js";
 
 // Access model: `requireListAccess` runs before every handler here and puts the
-// list id in `req.list`. The column is still called `username` for historical
-// reasons — see the note at the top of server/lists.js.
+// list id in `req.list` — the token says who is asking, that says whether they
+// may. See the note at the top of server/lists.js for how lists are identified.
 
 // Broadcasts to everyone viewing the list. The originating tab identifies
 // itself with X-Client-Id so it can ignore the echo of its own change instead
@@ -27,7 +27,7 @@ const toItemJson = (row) => ({ ...row, bought: Boolean(row.bought) });
 // Active items follow the manual order (`position`, which dictation appends to
 // and dragging rewrites); bought ones surface most-recently-checked first, so
 // "what did I just tick off" is always at the top of that group.
-const ITEM_COLUMNS = "id, name, note, count, username, bought, bought_at, position";
+const ITEM_COLUMNS = "id, name, note, count, list_id, bought, bought_at, position";
 const ITEM_ORDER =
   "ORDER BY bought, CASE WHEN bought = 1 THEN -COALESCE(bought_at, 0) ELSE COALESCE(position, rowid) END, rowid";
 
@@ -45,7 +45,7 @@ const HISTORY_LIMIT = 400;
 
 const nextPosition = (list) =>
   db
-    .prepare(`SELECT COALESCE(MAX(position), 0) + 1 AS next FROM items WHERE username = ?`)
+    .prepare(`SELECT COALESCE(MAX(position), 0) + 1 AS next FROM items WHERE list_id = ?`)
     .get(list).next;
 
 // Expired trash is swept lazily on reads. Doing it per request would mean a
@@ -70,20 +70,20 @@ const sweepTrash = () => {
 const recordHistory = (list, name) => {
   try {
     db.prepare(
-      `INSERT INTO history (username, name, name_lower, uses, last_used) VALUES (?, ?, ?, 1, ?)
-       ON CONFLICT(username, name_lower) DO UPDATE SET
+      `INSERT INTO history (list_id, name, name_lower, uses, last_used) VALUES (?, ?, ?, 1, ?)
+       ON CONFLICT(list_id, name_lower) DO UPDATE SET
          uses = uses + 1,
          last_used = excluded.last_used,
          name = excluded.name`,
     ).run(list, name, historyKey(name), Date.now());
 
     const { total } = db
-      .prepare("SELECT COUNT(*) AS total FROM history WHERE username = ?")
+      .prepare("SELECT COUNT(*) AS total FROM history WHERE list_id = ?")
       .get(list);
     if (total > HISTORY_LIMIT) {
       db.prepare(
         `DELETE FROM history WHERE id IN (
-           SELECT id FROM history WHERE username = ?
+           SELECT id FROM history WHERE list_id = ?
            ORDER BY uses ASC, last_used ASC LIMIT ?
          )`,
       ).run(list, total - HISTORY_LIMIT);
@@ -96,7 +96,7 @@ const recordHistory = (list, name) => {
 export const getItems = (req, res) => {
   sweepTrash();
   const rows = db
-    .prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE username = ? AND ${LIVE} ${ITEM_ORDER}`)
+    .prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE list_id = ? AND ${LIVE} ${ITEM_ORDER}`)
     .all(req.list);
   res.json(rows.map(toItemJson));
 };
@@ -107,7 +107,7 @@ export const getDeletedItems = (req, res) => {
   const rows = db
     .prepare(
       `SELECT ${ITEM_COLUMNS}, deleted_at FROM items
-        WHERE username = ? AND deleted_at IS NOT NULL
+        WHERE list_id = ? AND deleted_at IS NOT NULL
         ORDER BY deleted_at DESC LIMIT ?`,
     )
     .all(req.list, TRASH_VISIBLE);
@@ -119,13 +119,13 @@ export const getSuggestions = (req, res) => {
   const rows = q
     ? db
         .prepare(
-          `SELECT name, uses FROM history WHERE username = ? AND name_lower LIKE ? ESCAPE '\\'
+          `SELECT name, uses FROM history WHERE list_id = ? AND name_lower LIKE ? ESCAPE '\\'
            ORDER BY uses DESC, last_used DESC LIMIT 8`,
         )
         .all(req.list, q.replace(/[\\%_]/g, "\\$&") + "%")
     : db
         .prepare(
-          "SELECT name, uses FROM history WHERE username = ? ORDER BY uses DESC, last_used DESC LIMIT 12",
+          "SELECT name, uses FROM history WHERE list_id = ? ORDER BY uses DESC, last_used DESC LIMIT 12",
         )
         .all(req.list);
   res.json(rows);
@@ -152,7 +152,7 @@ export const addItem = (req, res) => {
   // row look like this", which also brings a deleted row back.
   const created = db.transaction(() => {
     const existing = db
-      .prepare("SELECT deleted_at FROM items WHERE id = ? AND username = ?")
+      .prepare("SELECT deleted_at FROM items WHERE id = ? AND list_id = ?")
       .get(id, req.list);
 
     if (existing) {
@@ -160,7 +160,7 @@ export const addItem = (req, res) => {
       db.prepare(
         `UPDATE items SET name = ?, note = ?, count = ?, bought = ?, bought_at = ?,
                           deleted_at = NULL, position = ?
-          WHERE id = ? AND username = ?`,
+          WHERE id = ? AND list_id = ?`,
       ).run(
         name,
         note,
@@ -175,7 +175,7 @@ export const addItem = (req, res) => {
     }
 
     db.prepare(
-      `INSERT INTO items (id, name, note, count, username, bought, bought_at, position)
+      `INSERT INTO items (id, name, note, count, list_id, bought, bought_at, position)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
@@ -216,20 +216,20 @@ export const changeItemCount = (req, res) => {
 
   const apply = db.transaction(() => {
     const item = db
-      .prepare(`SELECT name, count FROM items WHERE id = ? AND username = ? AND ${LIVE}`)
+      .prepare(`SELECT name, count FROM items WHERE id = ? AND list_id = ? AND ${LIVE}`)
       .get(id, req.list);
     if (!item) return null;
 
     const next = Math.min(MAX_COUNT, item.count + delta);
     if (next <= 0) {
-      db.prepare("UPDATE items SET deleted_at = ? WHERE id = ? AND username = ?").run(
+      db.prepare("UPDATE items SET deleted_at = ? WHERE id = ? AND list_id = ?").run(
         Date.now(),
         id,
         req.list,
       );
       return { label: `− ${item.name}` };
     }
-    db.prepare("UPDATE items SET count = ? WHERE id = ? AND username = ?").run(next, id, req.list);
+    db.prepare("UPDATE items SET count = ? WHERE id = ? AND list_id = ?").run(next, id, req.list);
     return { label: `${item.name} ×${next}` };
   });
 
@@ -276,7 +276,7 @@ export const updateItem = (req, res) => {
 
   const { changes } = db
     .prepare(
-      `UPDATE items SET ${assignments.join(", ")} WHERE id = ? AND username = ? AND ${LIVE}`,
+      `UPDATE items SET ${assignments.join(", ")} WHERE id = ? AND list_id = ? AND ${LIVE}`,
     )
     .run(...values, id, req.list);
   if (changes === 0) return res.status(404).json({ error: "Item not found" });
@@ -285,7 +285,7 @@ export const updateItem = (req, res) => {
 
   const label = hasName
     ? `✎ ${name}`
-    : `✎ ${db.prepare("SELECT name FROM items WHERE id = ? AND username = ?").get(id, req.list).name}`;
+    : `✎ ${db.prepare("SELECT name FROM items WHERE id = ? AND list_id = ?").get(id, req.list).name}`;
   notifyList(req, label);
   res.json({ success: true });
 };
@@ -299,11 +299,11 @@ export const setItemBought = (req, res) => {
   }
 
   const item = db
-    .prepare(`SELECT name FROM items WHERE id = ? AND username = ? AND ${LIVE}`)
+    .prepare(`SELECT name FROM items WHERE id = ? AND list_id = ? AND ${LIVE}`)
     .get(id, req.list);
   if (!item) return res.status(404).json({ error: "Item not found" });
 
-  db.prepare("UPDATE items SET bought = ?, bought_at = ? WHERE id = ? AND username = ?").run(
+  db.prepare("UPDATE items SET bought = ?, bought_at = ? WHERE id = ? AND list_id = ?").run(
     bought ? 1 : 0,
     bought ? Date.now() : null,
     id,
@@ -329,11 +329,11 @@ export const reorderItems = (req, res) => {
   const applied = db.transaction(() => {
     const live = new Set(
       db
-        .prepare(`SELECT id FROM items WHERE username = ? AND ${LIVE}`)
+        .prepare(`SELECT id FROM items WHERE list_id = ? AND ${LIVE}`)
         .all(req.list)
         .map((row) => row.id),
     );
-    const update = db.prepare("UPDATE items SET position = ? WHERE id = ? AND username = ?");
+    const update = db.prepare("UPDATE items SET position = ? WHERE id = ? AND list_id = ?");
 
     let position = 0;
     const seen = new Set();
@@ -356,7 +356,7 @@ export const reorderItems = (req, res) => {
 
 export const clearBought = (req, res) => {
   const { changes } = db
-    .prepare(`UPDATE items SET deleted_at = ? WHERE username = ? AND bought = 1 AND ${LIVE}`)
+    .prepare(`UPDATE items SET deleted_at = ? WHERE list_id = ? AND bought = 1 AND ${LIVE}`)
     .run(Date.now(), req.list);
 
   if (changes > 0) {
@@ -372,9 +372,9 @@ export const deleteItem = (req, res) => {
   }
 
   const item = db
-    .prepare(`SELECT name FROM items WHERE id = ? AND username = ? AND ${LIVE}`)
+    .prepare(`SELECT name FROM items WHERE id = ? AND list_id = ? AND ${LIVE}`)
     .get(id, req.list);
-  db.prepare(`UPDATE items SET deleted_at = ? WHERE id = ? AND username = ? AND ${LIVE}`).run(
+  db.prepare(`UPDATE items SET deleted_at = ? WHERE id = ? AND list_id = ? AND ${LIVE}`).run(
     Date.now(),
     id,
     req.list,
@@ -393,11 +393,11 @@ export const restoreItem = (req, res) => {
 
   const restored = db.transaction(() => {
     const item = db
-      .prepare("SELECT name FROM items WHERE id = ? AND username = ? AND deleted_at IS NOT NULL")
+      .prepare("SELECT name FROM items WHERE id = ? AND list_id = ? AND deleted_at IS NOT NULL")
       .get(id, req.list);
     if (!item) return null;
     db.prepare(
-      "UPDATE items SET deleted_at = NULL, bought = 0, bought_at = NULL, position = ? WHERE id = ? AND username = ?",
+      "UPDATE items SET deleted_at = NULL, bought = 0, bought_at = NULL, position = ? WHERE id = ? AND list_id = ?",
     ).run(nextPosition(req.list), id, req.list);
     return item;
   })();
@@ -411,7 +411,7 @@ export const restoreItem = (req, res) => {
 /** Empties the deleted drawer for good. */
 export const purgeDeleted = (req, res) => {
   const { changes } = db
-    .prepare("DELETE FROM items WHERE username = ? AND deleted_at IS NOT NULL")
+    .prepare("DELETE FROM items WHERE list_id = ? AND deleted_at IS NOT NULL")
     .run(req.list);
   if (changes > 0) notifyList(req, null);
   res.json({ success: true, purged: changes });

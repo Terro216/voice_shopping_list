@@ -19,8 +19,8 @@ const json = (data: unknown) => ({
 const lists = [{ id: 'ann', name: 'ann', owner: 'ann', owned: true, members: [] }];
 
 const items = [
-  { id: 'a', name: 'молоко', note: null, count: 2, username: 'ann', bought: false, bought_at: null },
-  { id: 'b', name: 'хлеб', note: null, count: 1, username: 'ann', bought: true, bought_at: 5 },
+  { id: 'a', name: 'молоко', note: null, count: 2, list_id: 'ann', bought: false, bought_at: null },
+  { id: 'b', name: 'хлеб', note: null, count: 1, list_id: 'ann', bought: true, bought_at: 5 },
 ];
 
 const routes: Record<string, Handler> = {
@@ -28,7 +28,7 @@ const routes: Record<string, Handler> = {
   '/api/items': () => items,
   '/api/items/suggestions': () => [],
   '/api/items/deleted': () => [
-    { id: 'c', name: 'кефир', note: null, count: 1, username: 'ann', bought: false, deleted_at: 9 },
+    { id: 'c', name: 'кефир', note: null, count: 1, list_id: 'ann', bought: false, deleted_at: 9 },
   ],
 };
 

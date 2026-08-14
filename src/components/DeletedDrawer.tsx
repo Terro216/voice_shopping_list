@@ -5,7 +5,8 @@ import styles from '../App.module.css';
 
 type Props = {
   items: Item[];
-  onOpen: () => void;
+  /** Told whenever the drawer opens or closes; open means "keep this fresh". */
+  onVisibilityChange: (visible: boolean) => void;
   onRestore: (id: string) => void;
   onPurge: () => void;
 };
@@ -16,14 +17,16 @@ type Props = {
  * undo toast is gone — so the removed rows stay reachable instead of vanishing.
  * Collapsed by default: it is a safety net, not part of the shopping.
  */
-export const DeletedDrawer = ({ items, onOpen, onRestore, onPurge }: Props) => {
+export const DeletedDrawer = ({ items, onVisibilityChange, onRestore, onPurge }: Props) => {
   const { t } = useT();
   const [open, setOpen] = useState(false);
 
-  // The contents are only worth fetching once somebody looks.
+  // The contents are only worth fetching, and keeping fresh, while somebody is
+  // actually looking at them.
   useEffect(() => {
-    if (open) onOpen();
-  }, [open, onOpen]);
+    onVisibilityChange(open);
+    return () => onVisibilityChange(false);
+  }, [open, onVisibilityChange]);
 
   return (
     <details

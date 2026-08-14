@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
+import { ApiError } from '../api/client';
 import { createList, dropList, renameList, type ListSummary } from '../api/lists';
 import { useT } from '../i18n';
 import { Sheet } from './Sheet';
@@ -49,7 +50,10 @@ export const ListsSheet = ({
       toast.success(t('listCreated', { name: list.name }));
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('somethingWrong'));
+      // The cap is the one server refusal a person can actually act on, so it
+      // gets said in their language rather than relayed in the server's.
+      if (err instanceof ApiError && err.status === 409) toast.error(t('listLimitReached'));
+      else toast.error(err instanceof Error ? err.message : t('somethingWrong'));
     } finally {
       setBusy(false);
     }

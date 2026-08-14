@@ -8,12 +8,11 @@ import { MAX_LIST_NAME_LENGTH, MAX_LISTS_PER_OWNER } from "./validation.js";
  * member, and membership is granted by opening an invite link carrying an
  * unguessable token.
  *
- * Historical note that explains the column names elsewhere: lists used to *be*
- * their owner's username, so `items.username`, `history.username`,
- * `list_access.list_username` and `push_subscriptions.list_username` all hold
- * what is now simply "the list id". An account's original list still has
- * `id = username`, which is why old invite links and offline queues survived
- * the change untouched.
+ * Historical note: lists used to *be* their owner's username, and the columns
+ * that reference one were named accordingly until migration 007 renamed them
+ * all to `list_id`. An account's original list still has `id = username`, which
+ * is why invite links, cached snapshots and queued offline mutations from
+ * before lists had names all kept working.
  */
 
 const selectList = db.prepare("SELECT id, name, owner, created_at FROM lists WHERE id = ?");
@@ -21,7 +20,7 @@ const selectList = db.prepare("SELECT id, name, owner, created_at FROM lists WHE
 export const getList = (id) => (typeof id === "string" ? (selectList.get(id) ?? null) : null);
 
 const selectAccess = db.prepare(
-  "SELECT 1 FROM list_access WHERE list_username = ? AND member = ?",
+  "SELECT 1 FROM list_access WHERE list_id = ? AND member = ?",
 );
 
 /**
@@ -62,8 +61,8 @@ export const accessibleLists = (viewer) => {
 
   const joined = db
     .prepare(
-      `SELECT a.list_username AS id, l.name AS name, l.owner AS owner
-         FROM list_access a LEFT JOIN lists l ON l.id = a.list_username
+      `SELECT a.list_id AS id, l.name AS name, l.owner AS owner
+         FROM list_access a LEFT JOIN lists l ON l.id = a.list_id
         WHERE a.member = ? ORDER BY a.granted_at`,
     )
     .all(viewer)
@@ -102,17 +101,17 @@ export const renameList = (id, name) => {
 /** Drops a list and everything hanging off it. Members simply lose the entry. */
 export const deleteList = (id) =>
   db.transaction(() => {
-    db.prepare("DELETE FROM items WHERE username = ?").run(id);
-    db.prepare("DELETE FROM history WHERE username = ?").run(id);
-    db.prepare("DELETE FROM list_access WHERE list_username = ?").run(id);
-    db.prepare("DELETE FROM list_shares WHERE list_username = ?").run(id);
-    db.prepare("DELETE FROM push_subscriptions WHERE list_username = ?").run(id);
+    db.prepare("DELETE FROM items WHERE list_id = ?").run(id);
+    db.prepare("DELETE FROM history WHERE list_id = ?").run(id);
+    db.prepare("DELETE FROM list_access WHERE list_id = ?").run(id);
+    db.prepare("DELETE FROM list_shares WHERE list_id = ?").run(id);
+    db.prepare("DELETE FROM push_subscriptions WHERE list_id = ?").run(id);
     db.prepare("DELETE FROM lists WHERE id = ?").run(id);
   })();
 
 export const listMembers = (list) =>
   db
-    .prepare("SELECT member FROM list_access WHERE list_username = ? ORDER BY granted_at")
+    .prepare("SELECT member FROM list_access WHERE list_id = ? ORDER BY granted_at")
     .all(list)
     .map((row) => row.member);
 
@@ -120,11 +119,11 @@ const newToken = () => crypto.randomBytes(18).toString("base64url");
 
 /** Current invite token for a list, minted on first use. */
 export const getOrCreateShareToken = (list) => {
-  const existing = db.prepare("SELECT token FROM list_shares WHERE list_username = ?").get(list);
+  const existing = db.prepare("SELECT token FROM list_shares WHERE list_id = ?").get(list);
   if (existing) return existing.token;
 
   const token = newToken();
-  db.prepare("INSERT INTO list_shares (list_username, token, created_at) VALUES (?, ?, ?)").run(
+  db.prepare("INSERT INTO list_shares (list_id, token, created_at) VALUES (?, ?, ?)").run(
     list,
     token,
     Date.now(),
@@ -136,27 +135,27 @@ export const getOrCreateShareToken = (list) => {
 export const rotateShareToken = (list) => {
   const token = newToken();
   db.prepare(
-    `INSERT INTO list_shares (list_username, token, created_at) VALUES (?, ?, ?)
-     ON CONFLICT(list_username) DO UPDATE SET token = excluded.token, created_at = excluded.created_at`,
+    `INSERT INTO list_shares (list_id, token, created_at) VALUES (?, ?, ?)
+     ON CONFLICT(list_id) DO UPDATE SET token = excluded.token, created_at = excluded.created_at`,
   ).run(list, token, Date.now());
   return token;
 };
 
 export const resolveShareToken = (token) =>
-  db.prepare("SELECT list_username FROM list_shares WHERE token = ?").get(token)?.list_username ??
+  db.prepare("SELECT list_id FROM list_shares WHERE token = ?").get(token)?.list_id ??
   null;
 
 export const grantAccess = (list, member) => {
   if (listOwner(list) === member) return;
   db.prepare(
-    "INSERT OR IGNORE INTO list_access (list_username, member, granted_at) VALUES (?, ?, ?)",
+    "INSERT OR IGNORE INTO list_access (list_id, member, granted_at) VALUES (?, ?, ?)",
   ).run(list, member, Date.now());
 };
 
 export const revokeAccess = (list, member) => {
-  db.prepare("DELETE FROM list_access WHERE list_username = ? AND member = ?").run(list, member);
+  db.prepare("DELETE FROM list_access WHERE list_id = ? AND member = ?").run(list, member);
   // A device can only be subscribed to a list it can still open.
-  db.prepare("DELETE FROM push_subscriptions WHERE list_username = ? AND subscriber = ?").run(
+  db.prepare("DELETE FROM push_subscriptions WHERE list_id = ? AND subscriber = ?").run(
     list,
     member,
   );

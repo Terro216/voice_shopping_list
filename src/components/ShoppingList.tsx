@@ -72,7 +72,7 @@ export const ShoppingList = ({
     toggleBought,
     reorder,
     clearBought,
-    loadDeleted,
+    watchDeleted,
     restoreDeleted,
     purgeDeleted,
     undo,
@@ -514,7 +514,7 @@ export const ShoppingList = ({
 
         <DeletedDrawer
           items={deletedItems}
-          onOpen={loadDeleted}
+          onVisibilityChange={watchDeleted}
           onRestore={handleRestore}
           onPurge={handlePurge}
         />

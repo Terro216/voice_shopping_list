@@ -91,18 +91,36 @@ export const useShoppingList = (list: string, viewer: string) => {
     tRef.current = t;
   }, [t]);
 
-  // Only fetched once the "deleted" drawer has been opened; after that it is
-  // kept in step with the list.
-  const trackDeletedRef = useRef(false);
+  // The drawer costs a request per list refresh, so it is only kept in step
+  // while it is actually open — not forever after the first time it was.
+  const deletedVisibleRef = useRef(false);
 
   const loadDeleted = useCallback(async () => {
-    trackDeletedRef.current = true;
     try {
-      setDeletedItems(await fetchDeletedItems(list));
+      const data = await fetchDeletedItems(list);
+      // The drawer is a convenience — but it is rendered inside the list, so
+      // anything other than an array here would take the whole screen down
+      // with it rather than just showing nothing.
+      setDeletedItems(Array.isArray(data) ? data : []);
     } catch {
-      // The drawer is a convenience; an empty one is better than an error page.
+      // An empty drawer is better than an error page.
     }
   }, [list]);
+
+  /** Told by the drawer whether anyone is looking at it. */
+  const watchDeleted = useCallback(
+    (visible: boolean) => {
+      deletedVisibleRef.current = visible;
+      if (visible) void loadDeleted();
+    },
+    [loadDeleted],
+  );
+
+  /** Mirrors a deletion into the open drawer instead of waiting for a refetch. */
+  const noteDeleted = useCallback((item: Item) => {
+    if (!deletedVisibleRef.current) return;
+    setDeletedItems((prev) => [{ ...item, deleted_at: Date.now() }, ...prev]);
+  }, []);
 
   const loadItems = useCallback(
     async (notifyOnChange = false) => {
@@ -113,7 +131,7 @@ export const useShoppingList = (list: string, viewer: string) => {
           toast(tRef.current('listUpdated'), { icon: '🔄', id: 'remote-update' });
         }
         applyItems(() => data);
-        if (trackDeletedRef.current) void loadDeleted();
+        if (deletedVisibleRef.current) void loadDeleted();
       } catch (err) {
         if (err instanceof ApiError && err.status === 403) {
           setAccessDenied(true);
@@ -215,20 +233,19 @@ export const useShoppingList = (list: string, viewer: string) => {
       applyItems((prev) => prev.filter((item) => item.id !== id));
       // Deleting only moves the item to the drawer, so mirror that locally
       // instead of waiting for a refetch to reveal it.
-      if (removed && trackDeletedRef.current) {
-        setDeletedItems((prev) => [{ ...removed, deleted_at: Date.now() }, ...prev]);
-      }
+      if (removed) noteDeleted(removed);
       try {
         await deleteItem(id, list);
       } catch {
         loadItems();
       }
     },
-    [list, applyItems, loadItems],
+    [list, applyItems, loadItems, noteDeleted],
   );
 
   const applyCount = useCallback(
     async (id: string, delta: number) => {
+      const before = itemsRef.current.find((item) => item.id === id);
       applyItems((prev) =>
         prev
           .map((item) =>
@@ -238,13 +255,16 @@ export const useShoppingList = (list: string, viewer: string) => {
           )
           .filter((item) => item.count > 0),
       );
+      // Counting down to zero is a deletion on the server, so it lands in the
+      // drawer like any other — show it there rather than only after a refetch.
+      if (before && before.count + delta <= 0) noteDeleted(before);
       try {
         await changeItemCount(id, list, delta);
       } catch {
         loadItems();
       }
     },
-    [list, applyItems, loadItems],
+    [list, applyItems, loadItems, noteDeleted],
   );
 
   const applyBought = useCallback(
@@ -341,7 +361,7 @@ export const useShoppingList = (list: string, viewer: string) => {
         name: trimmed,
         note: null,
         count,
-        username: list,
+        list_id: list,
         bought: false,
         bought_at: null,
       };
@@ -429,7 +449,7 @@ export const useShoppingList = (list: string, viewer: string) => {
     applyItems((prev) => prev.filter((item) => !item.bought));
     try {
       await clearBoughtItems(list);
-      if (trackDeletedRef.current) void loadDeleted();
+      if (deletedVisibleRef.current) void loadDeleted();
     } catch {
       loadItems();
     }
@@ -537,7 +557,7 @@ export const useShoppingList = (list: string, viewer: string) => {
     toggleBought,
     reorder,
     clearBought,
-    loadDeleted,
+    watchDeleted,
     restoreDeleted,
     purgeDeleted,
     undo,

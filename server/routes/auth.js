@@ -97,11 +97,11 @@ router.delete("/account", verifyToken, async (req, res) => {
     const ids = owned.includes(username) ? owned : [...owned, username];
 
     for (const list of ids) {
-      db.prepare("DELETE FROM items WHERE username = ?").run(list);
-      db.prepare("DELETE FROM history WHERE username = ?").run(list);
-      db.prepare("DELETE FROM list_shares WHERE list_username = ?").run(list);
-      db.prepare("DELETE FROM list_access WHERE list_username = ?").run(list);
-      db.prepare("DELETE FROM push_subscriptions WHERE list_username = ?").run(list);
+      db.prepare("DELETE FROM items WHERE list_id = ?").run(list);
+      db.prepare("DELETE FROM history WHERE list_id = ?").run(list);
+      db.prepare("DELETE FROM list_shares WHERE list_id = ?").run(list);
+      db.prepare("DELETE FROM list_access WHERE list_id = ?").run(list);
+      db.prepare("DELETE FROM push_subscriptions WHERE list_id = ?").run(list);
     }
 
     // Memberships and subscriptions this account holds in *other* people's lists.

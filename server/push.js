@@ -16,7 +16,7 @@ const pending = new Map(); // "list\nactor" -> { labels, timer }
 
 const flush = async (list, actor, labels) => {
   const subs = db
-    .prepare("SELECT * FROM push_subscriptions WHERE list_username = ? AND subscriber != ?")
+    .prepare("SELECT * FROM push_subscriptions WHERE list_id = ? AND subscriber != ?")
     .all(list, actor);
   if (subs.length === 0) return;
 

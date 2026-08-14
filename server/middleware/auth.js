@@ -34,15 +34,19 @@ export const verifyToken = (req, res, next) => {
 };
 
 /**
- * Guards every list-scoped endpoint. The list id arrives as `username` (query
- * for reads, body for writes) — the parameter kept its old name so that offline
- * mutations queued before lists became first-class still replay. The token says
- * who is asking, this says whether they may.
+ * Guards every list-scoped endpoint. The list id arrives as `list` — in the
+ * query for reads, in the body for writes. The token says who is asking, this
+ * says whether they may.
+ *
+ * `username` is still accepted as a name for the same parameter: mutations
+ * queued offline before the rename carry it in their URLs and bodies, and a
+ * phone that spent a week in a drawer has to be able to replay them.
  */
 export const requireListAccess = (req, res, next) => {
-  const list = req.method === "GET" || req.method === "DELETE" ? req.query.username : req.body?.username;
+  const source = req.method === "GET" || req.method === "DELETE" ? req.query : (req.body ?? {});
+  const list = source.list ?? source.username;
   if (!isValidListId(list)) {
-    return res.status(400).json({ error: "username is required" });
+    return res.status(400).json({ error: "list is required" });
   }
   if (!hasListAccess(req.user.username, list)) {
     return res.status(403).json({ error: "No access to this list" });
