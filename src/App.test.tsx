@@ -67,10 +67,17 @@ describe('App', () => {
     expect(screen.getByText('хлеб')).toBeTruthy();
   });
 
-  it('names the list from the catalog and offers the help button', async () => {
+  it('offers the guide as a button labelled in words, not a lone icon', async () => {
     render(<App />);
     await screen.findByText('молоко');
-    expect(screen.getByRole('button', { name: 'Как пользоваться' })).toBeTruthy();
+
+    // It used to be a bare "?" sixth in a row of header icons, which on a phone
+    // was pushed off the edge of the screen entirely.
+    const guide = screen.getByRole('button', { name: /Как пользоваться/ });
+    expect(guide.textContent).toContain('Как пользоваться');
+
+    fireEvent.click(guide);
+    expect(await screen.findByRole('dialog', { name: 'Как пользоваться' })).toBeTruthy();
   });
 
   it('opens the instructions on the very first visit', async () => {

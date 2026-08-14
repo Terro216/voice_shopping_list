@@ -81,6 +81,33 @@ describe('ItemRow gestures', () => {
     expect(handlers.onRemove).not.toHaveBeenCalled();
   });
 
+  it('draws the drag grip instead of relying on a font glyph', () => {
+    const handlers = {
+      onToggleBought: vi.fn(),
+      onIncrement: vi.fn(),
+      onDecrement: vi.fn(),
+      onEdit: vi.fn(),
+      onRemove: vi.fn(),
+      onDragStart: vi.fn(),
+    };
+    render(<ItemRow item={item} {...handlers} />);
+
+    // It was the braille character ⠿, which plenty of Android font stacks have
+    // no glyph for: the button existed and did nothing visible.
+    const grip = screen.getByLabelText(/Переместить|Move/);
+    expect(grip.querySelector('svg')).toBeTruthy();
+    expect(grip.textContent).toBe('');
+
+    fireEvent.pointerDown(grip, { pointerId: 3, clientY: 0, button: 0 });
+    expect(handlers.onDragStart).toHaveBeenCalled();
+  });
+
+  it('has no grip where reordering makes no sense', () => {
+    const { handlers } = setup(); // rendered without onDragStart
+    expect(screen.queryByLabelText(/Переместить|Move/)).toBeNull();
+    expect(handlers.onRemove).not.toHaveBeenCalled();
+  });
+
   it('still checks off on a plain tap', () => {
     const { handlers } = setup();
     fireEvent.click(screen.getByLabelText(/Отметить купленным|Mark as bought/));

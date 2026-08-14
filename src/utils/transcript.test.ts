@@ -25,6 +25,27 @@ describe('mergeTranscript', () => {
     expect(mergeTranscript('молоко', 'и хлеб')).toBe('молоко и хлеб');
   });
 
+  it('takes a re-delivery that only changed the ending as the same phrase', () => {
+    // «молоко 5» came back as «молока 5» after the engine restarted mid-phrase,
+    // and the list gained a second row for the same thing.
+    expect(mergeTranscript('молоко', 'молока 5')).toBe('молока 5');
+    expect(mergeTranscript('хлеб', 'хлеба два')).toBe('хлеба два');
+  });
+
+  it('keeps genuinely different words apart', () => {
+    expect(mergeTranscript('молоко', 'молоток')).toBe('молоко молоток');
+    expect(mergeTranscript('сок', 'сыр')).toBe('сок сыр');
+    expect(mergeTranscript('чай', 'чайник')).toBe('чай чайник');
+  });
+
+  it('«молоко 5» ends up as one item with a count, not two rows', () => {
+    const text = ['молоко', 'молока 5'].reduce(mergeTranscript, '');
+    expect(parseSpeechCommand(text)).toEqual({
+      type: 'add',
+      items: [{ name: 'молока', count: 5 }],
+    });
+  });
+
   it('normalizes whitespace and survives empty fragments', () => {
     expect(mergeTranscript('', '  молоко  ')).toBe('молоко');
     expect(mergeTranscript('молоко', '   ')).toBe('молоко');

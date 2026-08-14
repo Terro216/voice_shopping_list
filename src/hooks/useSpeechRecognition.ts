@@ -142,10 +142,25 @@ export const useSpeechRecognition = (
     // Chrome stops continuous recognition after silence; restart while the
     // user still wants to listen.
     rec.onend = () => {
-      // The engine stopping *is* the end of the phrase — no need to wait out
-      // the settle timer as well.
-      flushRef.current();
-      if (!isListeningRef.current) return;
+      // Deliberately NOT flushing when a restart is coming. The engine ends a
+      // session on any pause, including one in the middle of a phrase, and it
+      // routinely re-delivers what it already said in a revised form after the
+      // restart ("молоко" then "молока"). Flushing here applied the first take
+      // and left the revision looking like a brand new item; letting the settle
+      // timer decide keeps both takes in one utterance, where merging can see
+      // that they are the same words.
+      if (!isListeningRef.current) {
+        flushRef.current();
+        return;
+      }
+
+      // The revision arrives in the *next* session, so a phrase still being
+      // assembled gets its settle window started again from the restart rather
+      // than expiring during it.
+      if (utteranceRef.current) {
+        clearTimeout(settleTimerRef.current);
+        settleTimerRef.current = setTimeout(() => flushRef.current(), RESTART_DELAY_MS + SETTLE_MS);
+      }
       restartTimerRef.current = setTimeout(() => {
         if (isListeningRef.current && recognitionRef.current) {
           try {

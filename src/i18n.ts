@@ -57,7 +57,7 @@ const ru = {
 
   dragHandle: 'Переместить: {name}',
   orderLabel: 'порядок',
-  reorderHint: 'Держите ⠿ и тяните, чтобы расставить по порядку обхода магазина.',
+  reorderHint: 'Держите точки слева от позиции и тяните — список встанет в порядке обхода магазина.',
 
   viewing: 'смотрят',
   emptyList: 'Список пуст — надиктуйте или введите, что купить.',
@@ -152,14 +152,14 @@ const ru = {
   helpCommandsTitle: '🗣 Команды голосом',
   helpCommandsText: '«вычеркни молоко» — отметить купленным. «удали хлеб» — убрать из списка. «очисти купленное» — убрать всё отмеченное. «отмена» — вернуть как было.',
   helpGesturesTitle: '👆 Жесты',
-  helpGesturesText: 'Тап по строке — отметить купленным. Смахнуть вправо — то же самое, смахнуть влево — удалить. Держать ⠿ и тянуть — переставить в нужном порядке. Уведомление убирается касанием.',
+  helpGesturesText: 'Тап по строке — отметить купленным. Смахнуть вправо — то же самое, смахнуть влево — удалить. Держать точки слева от позиции и тянуть — переставить в нужном порядке. Уведомление убирается касанием.',
   helpListsTitle: '📋 Несколько списков',
   helpListsText: 'Кнопка «Списки» создаёт отдельные списки с любыми названиями и переключает между ними. Удалённые позиции лежат внизу в блоке «Удалённое» 30 дней.',
   helpShareTitle: '🔗 Вместе',
   helpShareText: 'Кнопка 🔗 даёт ссылку-приглашение. Кто её открыл — видит список и правит его, изменения появляются у всех сразу. 🔔 включает уведомления о чужих правках.',
   helpOfflineTitle: '📴 Без интернета',
   helpOfflineText: 'В магазине без связи список открывается и правится как обычно — изменения уйдут на сервер, когда связь вернётся.',
-  helpFooter: 'Эту справку всегда можно открыть кнопкой ❓ наверху.',
+  helpFooter: 'Эту справку всегда можно открыть кнопкой «❓ Как пользоваться» над списком.',
 
   edit: 'Изменить',
   renamePlaceholder: 'Название позиции',
@@ -220,7 +220,7 @@ const en: Record<keyof typeof ru, string> = {
 
   dragHandle: 'Move: {name}',
   orderLabel: 'order',
-  reorderHint: 'Hold ⠿ and drag to arrange the list in the order you walk the shop.',
+  reorderHint: 'Hold the dots on the left of a row and drag to arrange the list in the order you walk the shop.',
 
   viewing: 'viewing',
   emptyList: 'The list is empty — dictate or type something to buy.',
@@ -315,14 +315,14 @@ const en: Record<keyof typeof ru, string> = {
   helpCommandsTitle: '🗣 Spoken commands',
   helpCommandsText: '"check off milk" marks it bought. "remove bread" takes it off the list. "clear bought" empties the cart. "undo" puts the last change back.',
   helpGesturesTitle: '👆 Gestures',
-  helpGesturesText: 'Tap a row to check it off. Swipe right does the same, swipe left deletes. Hold ⠿ and drag to reorder. Tap a notification to dismiss it.',
+  helpGesturesText: 'Tap a row to check it off. Swipe right does the same, swipe left deletes. Hold the dots on the left of a row and drag to reorder. Tap a notification to dismiss it.',
   helpListsTitle: '📋 Several lists',
   helpListsText: '"Lists" creates separate lists with names of your own and switches between them. Deleted items sit in the "Deleted" drawer at the bottom for 30 days.',
   helpShareTitle: '🔗 Together',
   helpShareText: 'The 🔗 button hands out an invite link. Whoever opens it sees and edits the list, and changes show up for everyone at once. 🔔 turns on notifications about other people’s edits.',
   helpOfflineTitle: '📴 With no signal',
   helpOfflineText: 'In a shop with no reception the list still opens and still takes edits — they reach the server once you are back online.',
-  helpFooter: 'This page is always behind the ❓ button at the top.',
+  helpFooter: 'This page is always behind the “❓ How it works” button above the list.',
 
   edit: 'Edit',
   renamePlaceholder: 'Item name',

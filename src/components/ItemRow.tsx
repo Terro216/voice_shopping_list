@@ -31,6 +31,29 @@ const AXIS_BIAS = 1.4;
 
 type Axis = 'x' | 'y' | null;
 
+/**
+ * Drawn rather than typed. The grip used to be the braille character ⠿, which
+ * a good number of Android font stacks have no glyph for — the button was there
+ * and did its job, but on those phones it was simply invisible, so nobody could
+ * discover that rows could be dragged at all.
+ */
+const GripIcon = () => (
+  <svg
+    className={styles.gripIcon}
+    viewBox="0 0 10 16"
+    fill="currentColor"
+    aria-hidden="true"
+    focusable="false"
+  >
+    {[3, 8, 13].map((y) => (
+      <g key={y}>
+        <circle cx="3" cy={y} r="1.35" />
+        <circle cx="7" cy={y} r="1.35" />
+      </g>
+    ))}
+  </svg>
+);
+
 export const ItemRow = ({
   item,
   onToggleBought,
@@ -193,7 +216,7 @@ export const ItemRow = ({
                 }
               }}
             >
-              ⠿
+              <GripIcon />
             </button>
           )}
 

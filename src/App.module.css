@@ -55,8 +55,13 @@
   gap: 0.5rem;
 }
 
+/* Wraps on purpose. Six 44px targets plus a title do not fit across a phone,
+   and without this the last buttons were pushed off the right edge — present,
+   tappable in theory, and invisible in practice. */
 .headerActions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0.35rem;
 }
 
@@ -67,9 +72,13 @@
   line-height: 1;
 }
 
+/* `min-width: 0` lets a long list name shrink instead of shoving the buttons
+   off screen; a flex item refuses to go below its content width without it. */
 .title {
   font-size: 1.6rem;
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .listBar {
@@ -275,6 +284,13 @@
 
 .dragHandle:active {
   cursor: grabbing;
+}
+
+.gripIcon {
+  width: 10px;
+  height: 16px;
+  display: block;
+  pointer-events: none;
 }
 
 .reorderHint {

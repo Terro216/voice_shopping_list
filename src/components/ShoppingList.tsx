@@ -388,15 +388,6 @@ export const ShoppingList = ({
           <button
             type="button"
             className={styles.iconButton}
-            onClick={() => setSheet('help')}
-            title={t('help')}
-            aria-label={t('help')}
-          >
-            ❓
-          </button>
-          <button
-            type="button"
-            className={styles.iconButton}
             onClick={() => setSheet('settings')}
             title={t('settings')}
             aria-label={t('settings')}
@@ -410,6 +401,12 @@ export const ShoppingList = ({
         <button type="button" className={styles.listPickerButton} onClick={() => setSheet('lists')}>
           📚 {t('lists')}
           {lists.length > 1 && ` (${lists.length})`}
+        </button>
+        {/* Spelled out rather than hidden behind a "?" among five other icons:
+            the whole point of this one is that somebody meeting the app for the
+            first time can find it. */}
+        <button type="button" className={styles.listPickerButton} onClick={() => setSheet('help')}>
+          ❓ {t('help')}
         </button>
         {currentList && !currentList.owned && (
           <span className={styles.activeList}>
