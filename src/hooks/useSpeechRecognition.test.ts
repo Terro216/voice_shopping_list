@@ -138,3 +138,34 @@ describe('useSpeechRecognition', () => {
     expect(view.result.current.interimText).toBe('молоко и хлеб');
   });
 });
+
+
+describe('switching from list speech to editing', () => {
+  it('stops synchronously and ignores late commands without restarting', () => {
+    const { view, engine } = listen();
+    act(() => engine.deliver([{ text: 'молоко', final: true }]));
+    act(() => view.result.current.stopListening(true));
+    expect(onFinal).toHaveBeenCalledExactlyOnceWith('молоко');
+    act(() => {
+      engine.deliver([{ text: 'удали хлеб', final: true }]);
+      engine.onend?.();
+      vi.advanceTimersByTime(2000);
+    });
+    expect(onFinal).toHaveBeenCalledTimes(1);
+    expect(engine.start).toHaveBeenCalledTimes(1);
+    expect(view.result.current.isListening).toBe(false);
+  });
+});
+
+it('still accepts the final words when ordinary list dictation is stopped', () => {
+  const { view, engine } = listen();
+  act(() => engine.deliver([{ text: 'молоко', final: false }]));
+  act(() => view.result.current.toggleListening());
+  expect(onFinal).not.toHaveBeenCalled();
+  act(() => {
+    engine.deliver([{ text: 'молоко и хлеб', final: true }]);
+    engine.onend?.();
+  });
+  expect(onFinal).toHaveBeenCalledExactlyOnceWith('молоко и хлеб');
+  expect(view.result.current.isListening).toBe(false);
+});

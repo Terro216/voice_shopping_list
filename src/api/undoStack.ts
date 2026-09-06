@@ -1,4 +1,5 @@
 import { Item, ItemEdit } from './items';
+import type { Unit } from '../../shared/quantity.js';
 
 /**
  * Undo entries as data rather than closures.
@@ -11,7 +12,7 @@ import { Item, ItemEdit } from './items';
 export type UndoAction =
   | { kind: 'removeItem'; id: string }
   | { kind: 'restoreItems'; items: Item[] }
-  | { kind: 'changeCount'; id: string; delta: number }
+  | { kind: 'changeCount'; id: string; delta: number; unit?: Unit | null }
   | { kind: 'setBought'; id: string; bought: boolean }
   | { kind: 'editItem'; id: string; edit: ItemEdit }
   | { kind: 'reorder'; ids: string[] };

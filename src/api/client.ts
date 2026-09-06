@@ -74,6 +74,8 @@ type RequestOptions = {
   body?: unknown;
   /** Attach the stored token (and treat a 401 as an expired session). */
   auth?: boolean;
+  cache?: RequestCache;
+  signal?: AbortSignal;
 };
 
 export const request = async <T>(url: string, options: RequestOptions = {}): Promise<T> => {
@@ -85,6 +87,8 @@ export const request = async <T>(url: string, options: RequestOptions = {}): Pro
       method,
       headers: auth ? authHeaders() : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
+      cache: options.cache,
+      signal: options.signal,
     });
   } catch (err) {
     throw new NetworkError(err);

@@ -1,6 +1,7 @@
+import { isValidQuantity } from "../shared/quantity.js";
+export { isValidUnit, quantityLimit, roundQuantity } from "../shared/quantity.js";
 export const MAX_ITEM_NAME_LENGTH = 200;
 export const MAX_ITEM_NOTE_LENGTH = 200;
-export const MAX_COUNT = 999;
 export const MAX_LIST_NAME_LENGTH = 60;
 // Generous enough that nobody sane hits it, low enough that a scripted loop
 // cannot fill the database with empty lists.
@@ -59,8 +60,7 @@ export const normalizeItemNote = (note) => {
   return trimmed.length === 0 ? null : trimmed;
 };
 
-export const isValidCount = (count) =>
-  Number.isInteger(count) && count >= 1 && count <= MAX_COUNT;
+export const isValidCount = isValidQuantity;
 
 // Invite tokens are 18 random bytes in base64url.
 export const isValidShareToken = (token) =>

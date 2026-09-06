@@ -22,6 +22,9 @@ import { cue, haptic } from '../utils/feedback';
 import { LANGUAGES, useT, type Lang } from '../i18n';
 import type { ListSummary } from '../api/lists';
 import styles from '../App.module.css';
+import type { Item } from '../api/items';
+import { isValidQuantity, quantityStep } from '../../shared/quantity.js';
+import { formatQuantity } from '../utils/quantity';
 
 type Props = {
   list: string; // the list being viewed — not necessarily the viewer's own
@@ -91,8 +94,8 @@ export const ShoppingList = ({
   const listName = currentList?.name ?? (list === viewer ? viewer : t('activeList'));
 
   const addAndRefresh = useCallback(
-    async (name: string, count = 1) => {
-      await addItem(name, count);
+    async (name: string, count = 1, details: Pick<Item, 'unit' | 'note'> = {}) => {
+      await addItem(name, count, details);
       refreshFrequent();
     },
     [addItem, refreshFrequent],
@@ -161,11 +164,21 @@ export const ShoppingList = ({
             );
             return;
           }
+          if (command.items.some((parsed) => !isValidQuantity(parsed.count, parsed.unit))) {
+            cue('unrecognized');
+            toast.error(t('invalidQuantity'), { id: SPEECH_TOAST });
+            return;
+          }
+          if (command.items.some((parsed) => (parsed.note?.length ?? 0) > 200)) {
+            cue('unrecognized');
+            toast.error(t('noteTooLong'), { id: SPEECH_TOAST });
+            return;
+          }
           cue('added');
           toast.success(
             t('recognized', {
               items: command.items
-                .map((p: ParsedItem) => (p.count > 1 ? `${p.name} ×${p.count}` : p.name))
+                .map((p: ParsedItem) => `${p.name}${p.unit || p.count !== 1 ? ` ${formatQuantity(p, lang)}` : ''}${p.note ? ` — ${p.note}` : ''}`)
                 .join(', '),
             }),
             { id: SPEECH_TOAST },
@@ -173,7 +186,7 @@ export const ShoppingList = ({
           // Sequential: two mentions of the same item in one utterance must see
           // each other, otherwise they race into two rows instead of one ×2.
           for (const parsed of command.items) {
-            await addAndRefresh(parsed.name, parsed.count);
+            await addAndRefresh(parsed.name, parsed.count, parsed);
           }
           break;
         }
@@ -219,7 +232,7 @@ export const ShoppingList = ({
           break;
       }
     },
-    [items, addAndRefresh, setBought, removeItem, clearBought, performUndo, toastWithUndo, t],
+    [items, addAndRefresh, setBought, removeItem, clearBought, performUndo, toastWithUndo, t, lang],
   );
 
   const onSpeechError = useCallback(
@@ -230,7 +243,7 @@ export const ShoppingList = ({
   );
 
   const speechLang = LANGUAGES.find((option) => option.lang === lang)?.speech ?? 'ru-RU';
-  const { isListening, toggleListening, interimText, isSupported, flushNow } =
+  const { isListening, toggleListening, stopListening, interimText, isSupported, flushNow } =
     useSpeechRecognition(handleSpeech, speechLang, onSpeechError);
 
   // Keep the phone awake while dictating in the store.
@@ -245,7 +258,7 @@ export const ShoppingList = ({
     async (parsed: ParsedItem[]) => {
       setSheet('none');
       for (const item of parsed) {
-        await addAndRefresh(item.name, item.count);
+        await addAndRefresh(item.name, item.count, item);
       }
       if (parsed.length > 0) {
         cue('added');
@@ -343,9 +356,10 @@ export const ShoppingList = ({
       haptic('checked');
       toggleBought(id);
     },
-    onIncrement: (id: string) => changeCount(id, +1),
-    onDecrement: (id: string) => changeCount(id, -1),
+    onIncrement: (id: string) => changeCount(id, quantityStep(items.find((item) => item.id === id)?.unit)),
+    onDecrement: (id: string) => changeCount(id, -quantityStep(items.find((item) => item.id === id)?.unit)),
     onEdit: editItem,
+    onEditorOpen: () => stopListening(true),
     onRemove: handleRemove,
   };
 

@@ -221,3 +221,77 @@ describe('useShoppingList adding', () => {
     ]);
   });
 });
+
+describe('measured quantities and inline notes', () => {
+  it('persists notes and units and merges compatible quantities without floating-point drift', async () => {
+    served = [item('a', { name: 'сыра', count: 0.5, unit: 'kg', note: 'Без тмина' })];
+    const { result } = await mountLoaded();
+    await act(async () => { await result.current.addItem('сыра', 200, { unit: 'g', note: 'Без тмина' }); });
+    expect(result.current.items).toHaveLength(1);
+    expect(result.current.items[0]).toMatchObject({ count: 0.7, unit: 'kg', note: 'Без тмина' });
+    expect(sent('PATCH', '/count')[0].body).toMatchObject({ delta: 0.2, expectedUnit: 'kg' });
+    await act(async () => { await result.current.undo(); });
+    expect(result.current.items[0].count).toBe(0.5);
+  });
+
+  it('keeps incompatible units and different notes separate', async () => {
+    served = [item('a', { name: 'молоко', count: 1.5, unit: 'l', note: 'Без сахара' })];
+    const { result } = await mountLoaded();
+    await act(async () => {
+      await result.current.addItem('молоко', 2, { unit: 'pack', note: 'Без сахара' });
+      await result.current.addItem('молоко', 1, { unit: 'l', note: 'Шоколадное' });
+    });
+    expect(result.current.items).toHaveLength(3);
+    expect(sent('POST', '/api/items').map(call => call.body)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ count: 2, unit: 'pack', note: 'Без сахара' }),
+      expect.objectContaining({ count: 1, unit: 'l', note: 'Шоколадное' }),
+    ]));
+  });
+
+  it('undoes a unit edit after reloading with both original quantity and unit', async () => {
+    served = [item('a', { count: 500, unit: 'g' })];
+    const first = await mountLoaded();
+    await act(async () => { await first.result.current.editItem('a', { count: 0.5, unit: 'kg' }); });
+    served = first.result.current.items;
+    first.unmount();
+    const second = await mountLoaded();
+    await act(async () => { await second.result.current.undo(); });
+    expect(second.result.current.items[0]).toMatchObject({ count: 500, unit: 'g' });
+    expect(sent('PATCH', '/api/items/a').slice(-1)[0]?.body).toMatchObject({ count: 500, unit: 'g' });
+  });
+
+  it('skips a quantity undo after someone changes its unit', async () => {
+    served = [item('a', { count: 0.5, unit: 'kg' })];
+    const first = await mountLoaded();
+    await act(async () => { await first.result.current.changeCount('a', 0.1); });
+    first.unmount();
+    served = [item('a', { count: 600, unit: 'g' })];
+    const second = await mountLoaded();
+    calls = [];
+    await act(async () => { expect(await second.result.current.undo()).toBeNull(); });
+    expect(sent('PATCH', '/count')).toHaveLength(0);
+    expect(second.result.current.items[0].count).toBe(600);
+  });
+
+  it('undoes the actual capped delta and creates no undo for a no-op at the limit', async () => {
+    served = [item('a', { count: 998.9, unit: 'kg' })];
+    const { result } = await mountLoaded();
+    await act(async () => {
+      await result.current.changeCount('a', 0.2);
+      await result.current.changeCount('a', 0.1);
+    });
+    expect(result.current.items[0].count).toBe(999);
+    expect(sent('PATCH', '/count')).toHaveLength(1);
+    await act(async () => { await result.current.undo(); });
+    expect(result.current.items[0].count).toBe(998.9);
+  });
+
+  it('restores a fractional item removed by the minus button', async () => {
+    served = [item('a', { count: 0.05, unit: 'kg', note: 'Свежий' })];
+    const { result } = await mountLoaded();
+    await act(async () => { await result.current.changeCount('a', -0.1); });
+    expect(result.current.items).toHaveLength(0);
+    await act(async () => { await result.current.undo(); });
+    expect(result.current.items[0]).toMatchObject({ count: 0.05, unit: 'kg', note: 'Свежий' });
+  });
+});

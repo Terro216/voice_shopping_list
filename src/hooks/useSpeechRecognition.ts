@@ -19,6 +19,7 @@ type SpeechRecognitionLike = {
   onend: (() => void) | null;
   start: () => void;
   stop: () => void;
+  abort?: () => void;
 };
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
@@ -76,6 +77,7 @@ export const useSpeechRecognition = (
   const [isSupported] = useState(() => Boolean(getSpeechRecognition()));
 
   const isListeningRef = useRef(isListening);
+  const acceptResultsRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -123,6 +125,9 @@ export const useSpeechRecognition = (
     rec.lang = language;
 
     rec.onresult = (event) => {
+      // Opening an editor stops list dictation. Ignore delayed results from
+      // that old session so words meant for a note never become list commands.
+      if (!acceptResultsRef.current) return;
       let interim = '';
       let final = '';
 
@@ -157,6 +162,8 @@ export const useSpeechRecognition = (
     rec.onerror = (event) => {
       console.error('Speech recognition error:', event.error);
       if (FATAL_ERRORS.has(event.error)) {
+        isListeningRef.current = false;
+        clearTimeout(restartTimerRef.current);
         setIsListening(false);
         // Whatever was already understood should still be applied.
         flushRef.current();
@@ -177,6 +184,7 @@ export const useSpeechRecognition = (
       // that they are the same words.
       if (!isListeningRef.current) {
         flushRef.current();
+        acceptResultsRef.current = false;
         return;
       }
 
@@ -201,6 +209,7 @@ export const useSpeechRecognition = (
     recognitionRef.current = rec;
 
     return () => {
+      acceptResultsRef.current = false;
       clearTimeout(restartTimerRef.current);
       clearTimeout(settleTimerRef.current);
       utteranceRef.current = '';
@@ -215,10 +224,25 @@ export const useSpeechRecognition = (
     };
   }, [language]);
 
+  const stopListening = useCallback((discardLateResults = false) => {
+    isListeningRef.current = false;
+    if (discardLateResults) acceptResultsRef.current = false;
+    setIsListening(false);
+    clearTimeout(restartTimerRef.current);
+    flushUtterance();
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      // never started — fine
+    }
+  }, [flushUtterance]);
+
   const toggleListening = useCallback(() => {
-    const next = !isListening;
+    const next = !isListeningRef.current;
+    isListeningRef.current = next;
     setIsListening(next);
     if (next) {
+      acceptResultsRef.current = true;
       utteranceRef.current = '';
       setInterimText('');
       cue('listenStart');
@@ -229,16 +253,9 @@ export const useSpeechRecognition = (
       }
     } else {
       cue('listenStop');
-      clearTimeout(restartTimerRef.current);
-      // Stopping mid-phrase must not throw away what was already understood.
-      flushUtterance();
-      try {
-        recognitionRef.current?.stop();
-      } catch {
-        // never started — fine
-      }
+      stopListening();
     }
-  }, [isListening, flushUtterance]);
+  }, [stopListening]);
 
-  return { isListening, toggleListening, interimText, isSupported, flushNow: flushUtterance };
+  return { isListening, toggleListening, stopListening, interimText, isSupported, flushNow: flushUtterance };
 };

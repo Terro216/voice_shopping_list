@@ -1,8 +1,10 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Item, ItemEdit } from '../api/items';
 import { haptic } from '../utils/feedback';
 import { useT } from '../i18n';
 import styles from '../App.module.css';
+import { formatQuantity } from '../utils/quantity';
+import { ItemEditSheet } from './ItemEditSheet';
 
 type Props = {
   item: Item;
@@ -11,6 +13,7 @@ type Props = {
   onDecrement: (id: string) => void;
   onEdit: (id: string, edit: ItemEdit) => void;
   onRemove: (id: string) => void;
+  onEditorOpen?: () => void;
   /** Present only where reordering makes sense (the active part of the list). */
   onDragStart?: (id: string, event: React.PointerEvent) => void;
   onMoveByKeyboard?: (id: string, direction: -1 | 1) => void;
@@ -61,49 +64,26 @@ export const ItemRow = ({
   onDecrement,
   onEdit,
   onRemove,
+  onEditorOpen,
   onDragStart,
   onMoveByKeyboard,
   isDragging = false,
   dragOffset = 0,
   registerRow,
 }: Props) => {
-  const { t } = useT();
+  const { t, lang } = useT();
   const [editing, setEditing] = useState(false);
-  const [nameDraft, setNameDraft] = useState(item.name);
-  const [noteDraft, setNoteDraft] = useState(item.note ?? '');
+  const [focusNote, setFocusNote] = useState(false);
   const [swipe, setSwipe] = useState(0);
   const [settling, setSettling] = useState(false);
 
   const gesture = useRef({ id: -1, x0: 0, y0: 0, axis: null as Axis, width: 1, armed: false });
 
-  const editorRef = useRef<HTMLFormElement>(null);
-
-  const openEditor = () => {
-    setNameDraft(item.name);
-    setNoteDraft(item.note ?? '');
+  const closeEditor = useCallback(() => setEditing(false), []);
+  const openEditor = (note = false) => {
+    onEditorOpen?.();
+    setFocusNote(note);
     setEditing(true);
-  };
-
-  const save = () => {
-    onEdit(item.id, { name: nameDraft, note: noteDraft });
-    setEditing(false);
-  };
-
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    save();
-  };
-
-  /**
-   * Tapping away from the editor keeps the edit. Typing a note and then
-   * touching anything else is how people leave a form they consider finished —
-   * treating that as "discard" threw the note away without a word. Escape is
-   * the way out for anyone who wants one.
-   */
-  const onEditorBlur = (e: React.FocusEvent<HTMLFormElement>) => {
-    const goingTo = e.relatedTarget as Node | null;
-    if (goingTo && editorRef.current?.contains(goingTo)) return; // moved between fields
-    save();
   };
 
   const commitThreshold = () =>
@@ -193,6 +173,7 @@ export const ItemRow = ({
       : undefined;
 
   return (
+    <>
     <div
       className={`${styles.item} ${item.bought ? styles.itemBought : ''} ${
         isDragging ? styles.itemDragging : ''
@@ -251,9 +232,8 @@ export const ItemRow = ({
             </span>
             <span className={styles.itemText}>
               <span className={styles.itemName}>{item.name}</span>
-              {item.note && <span className={styles.itemNote}>{item.note}</span>}
             </span>
-            {item.count > 1 && <span className={styles.itemCount}>×{item.count}</span>}
+            {(item.unit || item.count !== 1) && <span className={styles.itemCount}>{formatQuantity(item, lang)}</span>}
           </button>
 
           <div className={styles.itemControls}>
@@ -262,14 +242,14 @@ export const ItemRow = ({
                 <button
                   className={styles.stepButton}
                   onClick={() => onDecrement(item.id)}
-                  aria-label={t('oneLess', { name: item.name })}
+                  aria-label={t(item.unit ? 'decreaseQuantity' : 'oneLess', { name: item.name })}
                 >
                   −
                 </button>
                 <button
                   className={styles.stepButton}
                   onClick={() => onIncrement(item.id)}
-                  aria-label={t('oneMore', { name: item.name })}
+                  aria-label={t(item.unit ? 'increaseQuantity' : 'oneMore', { name: item.name })}
                 >
                   +
                 </button>
@@ -279,7 +259,7 @@ export const ItemRow = ({
                 while walking used to wipe an item instead of decrementing it. */}
             <button
               className={styles.stepButton}
-              onClick={() => (editing ? setEditing(false) : openEditor())}
+              onClick={() => openEditor()}
               aria-label={t('edit')}
               aria-expanded={editing}
             >
@@ -288,46 +268,16 @@ export const ItemRow = ({
           </div>
         </div>
 
-        {editing && (
-          <form
-            ref={editorRef}
-            className={styles.itemEditor}
-            onSubmit={submit}
-            onBlur={onEditorBlur}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                e.stopPropagation();
-                setEditing(false);
-              }
-            }}
-          >
-            <input
-              value={nameDraft}
-              onChange={(e) => setNameDraft(e.target.value)}
-              aria-label={t('renamePlaceholder')}
-              placeholder={t('renamePlaceholder')}
-              autoFocus
-            />
-            <input
-              value={noteDraft}
-              onChange={(e) => setNoteDraft(e.target.value)}
-              aria-label={t('notePlaceholder')}
-              placeholder={t('notePlaceholder')}
-            />
-            <div className={styles.itemEditorActions}>
-              <button type="submit">{t('save')}</button>
-              <button
-                type="button"
-                className={styles.removeButton}
-                onClick={() => onRemove(item.id)}
-                aria-label={t('removeItem', { name: item.name })}
-              >
-                🗑
-              </button>
-            </div>
-          </form>
-        )}
+        <button type="button" className={styles.noteLink}
+          onClick={() => openEditor(true)}
+          aria-label={t(item.note ? 'editNoteFor' : 'addNoteFor', { name: item.name })}>
+          <span aria-hidden="true">{item.note ? '✎' : '+'}</span> {item.note || t('addNote')}
+        </button>
       </div>
     </div>
+    {editing && (
+      <ItemEditSheet item={item} focusNote={focusNote} onEdit={onEdit} onRemove={onRemove} onClose={closeEditor} />
+    )}
+    </>
   );
 };

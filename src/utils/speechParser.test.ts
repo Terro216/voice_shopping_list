@@ -40,15 +40,15 @@ describe('speechParser', () => {
   });
 
   it('understands russian number words', () => {
-    expect(parseSpeechText('купи две пачки масла')).toEqual([{ name: 'пачки масла', count: 2 }]);
+    expect(parseSpeechText('купи две пачки масла')).toEqual([{ name: 'масла', count: 2, unit: 'pack' }]);
   });
 
   it('understands english number words', () => {
     expect(parseSpeechText('buy three eggs')).toEqual([{ name: 'eggs', count: 3 }]);
   });
 
-  it('keeps large numbers as part of the name', () => {
-    expect(parseSpeechText('500 грамм сыра')).toEqual([{ name: '500 грамм сыра', count: 1 }]);
+  it('reads grams above the old count limit', () => {
+    expect(parseSpeechText('500 грамм сыра')).toEqual([{ name: 'сыра', count: 500, unit: 'g' }]);
   });
 
   it('does not split names on " с "', () => {
@@ -81,9 +81,9 @@ describe('speechParser', () => {
     ]);
   });
 
-  it('still keeps a measurement inside the name', () => {
+  it('reads a measurement beside an unmeasured item', () => {
     expect(parseSpeechText('500 грамм сыра и молоко 2')).toEqual([
-      { name: '500 грамм сыра', count: 1 },
+      { name: 'сыра', count: 500, unit: 'g' },
       { name: 'молоко', count: 2 },
     ]);
   });
@@ -198,5 +198,58 @@ describe('parseBulkText', () => {
 
   it('returns nothing for text without items', () => {
     expect(parseBulkText('\n  \n')).toEqual([]);
+  });
+});
+
+
+describe('quantities and inline notes', () => {
+  it.each([
+    ['полкило помидоров', 'помидоров', 0.5, 'kg'],
+    ['полтора литра молока', 'молока', 1.5, 'l'],
+    ['два с половиной килограмма картошки', 'картошки', 2.5, 'kg'],
+    ['двести пятьдесят граммов сыра', 'сыра', 250, 'g'],
+    ['масло 250г', 'масло', 250, 'g'],
+    ['масло 250г.', 'масло', 250, 'g'],
+    ['1,5л молока', 'молока', 1.5, 'l'],
+    ['1500 мл сока', 'сока', 1500, 'ml'],
+    ['две упаковки яиц', 'яиц', 2, 'pack'],
+    ['десять штук яиц', 'яиц', 10, 'pcs'],
+    ['half a kilo of tomatoes', 'tomatoes', 0.5, 'kg'],
+    ['two liters of milk', 'milk', 2, 'l'],
+    ['2 пачки масла по 200 г', 'масла по 200 г', 2, 'pack'],
+  ])('parses %s', (text, name, count, unit) => {
+    expect(parseSpeechText(text)).toEqual([{ name, count, unit }]);
+  });
+
+  it('protects decimal commas while splitting item separators', () => {
+    expect(parseSpeechText('1,5 кг яблок, 500 г сыра и хлеб')).toEqual([
+      { name: 'яблок', count: 1.5, unit: 'kg' },
+      { name: 'сыра', count: 500, unit: 'g' },
+      { name: 'хлеб', count: 1 },
+    ]);
+  });
+
+  it('preserves note punctuation, case and command words', () => {
+    expect(parseSpeechCommand('добавь два литра молока, заметка — Безлактозное, удали хлеб и очисти купленное')).toEqual({
+      type: 'add', items: [{ name: 'молока', count: 2, unit: 'l', note: 'Безлактозное, удали хлеб и очисти купленное' }],
+    });
+  });
+
+  it('attaches a note to the last item and supports an explicit next item', () => {
+    expect(parseSpeechText('хлеб и молоко с заметкой Без сахара следующий товар яйца примечание: Крупные')).toEqual([
+      { name: 'хлеб', count: 1 }, { name: 'молоко', count: 1, note: 'Без сахара' }, { name: 'яйца', count: 1, note: 'Крупные' },
+    ]);
+  });
+
+  it('keeps decimal prefixes and separates notes and units in a pasted list', () => {
+    expect(parseBulkText('1.5 л молока, заметка A\n0,5 л молока, заметка A\n1 л молока, заметка B\n2 упаковки молока')).toEqual([
+      { name: 'молока', count: 2, unit: 'l', note: 'A' },
+      { name: 'молока', count: 1, unit: 'l', note: 'B' },
+      { name: 'молока', count: 2, unit: 'pack' },
+    ]);
+  });
+
+  it('retains large bare model numbers', () => {
+    expect(parseSpeechText('фильтр 500')).toEqual([{ name: 'фильтр 500', count: 1 }]);
   });
 });

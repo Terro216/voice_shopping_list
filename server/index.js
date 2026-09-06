@@ -13,6 +13,7 @@ import itemsRouter from "./routes/items.js";
 import authRouter from "./routes/auth.js";
 import listsRouter from "./routes/lists.js";
 import pushRouter from "./routes/push.js";
+import guestRouter from "./routes/guest.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -106,6 +107,7 @@ io.on("connection", (socket) => {
 // Only the unauthenticated auth endpoints are limited by IP; everything behind
 // a token is limited per account inside its own router (see rateLimits.js).
 app.use("/api/auth", authLimiter, authRouter);
+app.use("/api/guest", guestRouter);
 app.use("/api/items", itemsRouter);
 app.use("/api/lists", listsRouter);
 app.use("/api/push", pushRouter);

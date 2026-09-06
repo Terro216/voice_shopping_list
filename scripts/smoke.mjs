@@ -1,7 +1,8 @@
 // End-to-end smoke test: boots the real server on a test port with an isolated
 // database and exercises the auth + items API. Run: npm run smoke
 import { spawn } from 'child_process';
-import { rmSync } from 'fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync } from 'fs';
+import Database from 'better-sqlite3';
 import { setTimeout as sleep } from 'timers/promises';
 import { io as connectSocket } from 'socket.io-client';
 
@@ -30,10 +31,23 @@ const api = async (path, { method = 'GET', body, token } = {}) => {
   } catch {
     /* non-JSON */
   }
-  return { status: res.status, data };
+  return { status: res.status, data, headers: res.headers };
 };
 
 const dataDir = `smoke-data-${process.pid}`;
+// Start from the previous schema with a real legacy row, so startup also
+// exercises the additive unit migration instead of only creating a fresh DB.
+mkdirSync(dataDir);
+const fixture = new Database(`${dataDir}/database.sqlite`);
+fixture.exec('CREATE TABLE migrations (id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL)');
+for (const file of readdirSync('server/db/migrations').filter(file => file.endsWith('.sql') && file < '008-').sort()) {
+  fixture.exec(readFileSync(`server/db/migrations/${file}`, 'utf8'));
+  fixture.prepare('INSERT INTO migrations (name) VALUES (?)').run(file);
+}
+fixture.prepare('INSERT INTO items (id, name, note, count, list_id, bought) VALUES (?, ?, ?, ?, ?, ?)')
+  .run('legacy-fixture', 'Legacy item', 'Keep this note', 3, 'migration-fixture', 1);
+const previousIndexes = fixture.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'items' ORDER BY name").all();
+fixture.close();
 const server = spawn('node', ['server/index.js'], {
   env: { ...process.env, PORT: String(PORT), NODE_ENV: '', DATA_DIR: dataDir },
   stdio: ['ignore', 'pipe', 'inherit'],
@@ -52,6 +66,12 @@ await new Promise((resolve, reject) => {
 });
 
 try {
+  const migrated = new Database(`${dataDir}/database.sqlite`, { readonly: true });
+  const legacy = migrated.prepare('SELECT name, note, count, unit, bought FROM items WHERE id = ?').get('legacy-fixture');
+  check('unit migration preserves legacy item fields', JSON.stringify(legacy) === JSON.stringify({ name: 'Legacy item', note: 'Keep this note', count: 3, unit: null, bought: 1 }));
+  check('unit migration preserves item indexes', JSON.stringify(previousIndexes) === JSON.stringify(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'items' ORDER BY name").all()));
+  check('migrated database integrity', migrated.pragma('integrity_check', { simple: true }) === 'ok');
+  migrated.close();
   let r = await api('/api/auth/register', { method: 'POST', body: { username: user, password: 'password123' } });
   check('register → 201 + token', r.status === 201 && !!r.data.token, JSON.stringify(r));
   const token = r.data.token;
@@ -190,6 +210,36 @@ try {
   r = await api(`/api/items?list=${user}`, { token });
   check('created note round-trips', r.data?.find((i) => i.id === 'item-n')?.note === 'без плесени', JSON.stringify(r.data));
 
+  // ---- measured quantities, validation, stale deltas and restore ----
+  r = await api('/api/items', { method: 'POST', token, body: { id: 'measured', list: user, name: 'молоко', count: 1.5, unit: 'l', note: 'Безлактозное' } });
+  check('fractional item created with unit and note', r.status === 201, JSON.stringify(r));
+  r = await api(`/api/items?list=${user}`, { token });
+  check('fractional quantity and note round-trip', r.data?.some(i => i.id === 'measured' && i.count === 1.5 && i.unit === 'l' && i.note === 'Безлактозное'));
+  for (const [count, unit] of [[1.5, null], [1.5, 'pcs'], [1.5, 'pack'], [1.0001, 'kg'], [1000, 'l'], [1000000, 'g'], [0, 'kg'], [-1, 'g'], ['2', 'l'], [2, 'invalid']]) {
+    r = await api('/api/items', { method: 'POST', token, body: { id: 'invalid-measure', list: user, name: 'invalid', count, unit } });
+    check(`invalid quantity ${count} ${unit} rejected`, r.status === 400, JSON.stringify(r));
+  }
+  r = await api('/api/items/measured/count', { method: 'PATCH', token, body: { list: user, delta: 0.1, expectedUnit: 'l' } });
+  check('fractional increment accepted', r.status === 200, JSON.stringify(r));
+  r = await api(`/api/items?list=${user}`, { token });
+  check('increment has no floating-point drift', r.data?.find(i => i.id === 'measured')?.count === 1.6);
+  r = await api('/api/items/measured', { method: 'PATCH', token, body: { list: user, count: 1600, unit: 'ml' } });
+  check('unit and count edit accepted together', r.status === 200, JSON.stringify(r));
+  r = await api('/api/items/measured/count', { method: 'PATCH', token, body: { list: user, delta: 0.1, expectedUnit: 'l' } });
+  check('stale unit increment rejected with conflict', r.status === 409, JSON.stringify(r));
+  r = await api('/api/items/measured', { method: 'PATCH', token, body: { list: user, unit: 'pcs', name: 'should not persist' } });
+  check('invalid unit-only edit rejected atomically', r.status === 400, JSON.stringify(r));
+  r = await api(`/api/items?list=${user}`, { token });
+  check('invalid edit preserves name and quantity', r.data?.some(i => i.id === 'measured' && i.name === 'молоко' && i.count === 1600 && i.unit === 'ml'));
+  await api(`/api/items/measured?list=${user}`, { method: 'DELETE', token });
+  r = await api(`/api/items/deleted?list=${user}`, { token });
+  check('deleted measured item preserves unit', r.data?.some(i => i.id === 'measured' && i.unit === 'ml' && i.count === 1600));
+  await api('/api/items', { method: 'POST', token, body: { id: 'measured', list: user, name: 'молоко', count: 1.6, unit: 'l', note: 'Безлактозное' } });
+  r = await api(`/api/items?list=${user}`, { token });
+  check('undo-style restore preserves fractional quantity', r.data?.some(i => i.id === 'measured' && i.count === 1.6 && i.unit === 'l' && i.note === 'Безлактозное'));
+  // Leave subsequent count/order assertions independent of this fixture.
+  await api(`/api/items/measured?list=${user}`, { method: 'DELETE', token });
+
   // ---- most recently bought sorts first within the bought group ----
   await api('/api/items', { method: 'POST', token, body: { id: 'b-1', name: 'первый', list: user } });
   await api('/api/items', { method: 'POST', token, body: { id: 'b-2', name: 'второй', list: user } });
@@ -232,6 +282,56 @@ try {
   const invite = r.data?.token;
   check('owner gets an invite token', r.status === 200 && typeof invite === 'string' && invite.length >= 16, JSON.stringify(r));
 
+  // ---- guests: the invite permits only a preview, with no membership ----
+  r = await api(`/api/guest/list?token=${invite}`);
+  check('guest invite opens a preview without an account', r.status === 200 && r.data?.name === user);
+  check('guest previews are never cached or indexed', r.headers.get('cache-control') === 'no-store' && r.headers.get('x-robots-tag') === 'noindex, nofollow');
+  const memberItems = (await api(`/api/items?list=${user}`, { token })).data;
+  const visibleFields = memberItems.map(({ id, name, note, count, unit, bought }) => ({ id, name, note, count, unit, bought }));
+  check('guest sees the same live items in the same order, without private metadata', JSON.stringify(r.data) === JSON.stringify({ name: user, items: visibleFields }));
+  check('guest cannot see deleted items', !r.data.items.some((item) => item.id === 'item-3'));
+  r = await api(`/api/lists/members?list=${user}`, { token });
+  check('guest preview does not create a membership', r.data?.members.length === 0);
+
+  for (const query of ['', `?list=${user}`, '?token=nope', '?token=' + 'a'.repeat(24), `?token=${invite}&token=${invite}`]) {
+    r = await api('/api/guest/list' + query);
+    check(`guest preview rejects missing, guessed or malformed capabilities (${query ? 'query' : 'missing'})`, r.status === 404);
+  }
+  r = await api(`/api/guest/list?token=${invite}&list=${other}`);
+  check('query parameters cannot redirect a guest invite to another list', r.data?.name === user);
+
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+    r = await api(`/api/guest/list?token=${invite}`, { method, body: { list: user, name: 'changed' } });
+    check(`guest endpoint refuses ${method}`, r.status === 404);
+  }
+  const writes = [
+    ['/api/items', 'POST', { id: 'guest-write', name: 'x', list: user }],
+    ['/api/items/item-r', 'PATCH', { list: user, name: 'changed' }],
+    ['/api/items/item-r/count', 'PATCH', { list: user, delta: 1 }],
+    ['/api/items/item-r/bought', 'PATCH', { list: user, bought: true }],
+    [`/api/items/item-r?list=${user}`, 'DELETE'],
+    [`/api/items/bought?list=${user}`, 'DELETE'],
+    ['/api/items/order', 'PUT', { list: user, ids: ['item-r'] }],
+    ['/api/items/item-3/restore', 'POST', { list: user }],
+    [`/api/items/deleted?list=${user}`, 'DELETE'],
+    ['/api/lists/join', 'POST', { token: invite }],
+    [`/api/lists/${user}`, 'DELETE'],
+    ['/api/lists/share/rotate', 'POST', { list: user }],
+    ['/api/push/subscribe', 'POST', { list: user }],
+  ];
+  for (const [path, method, body] of writes) {
+    for (const credential of [undefined, invite]) {
+      r = await api(path, { method, body, token: credential });
+      check(`guest ${credential ? 'invite as bearer' : 'without session'} cannot ${method} ${path.split('?')[0]}`, r.status === 401);
+    }
+  }
+  for (const path of ['/api/lists', `/api/lists/members?list=${user}`, `/api/items/deleted?list=${user}`, `/api/items/suggestions?list=${user}`]) {
+    r = await api(path, { token: invite });
+    check('guest token cannot read memberships, history or trash', r.status === 401);
+  }
+  r = await api(`/api/items?list=${user}`, { token });
+  check('attempted guest writes leave the list intact', JSON.stringify(r.data) === JSON.stringify(memberItems));
+
   r = await api('/api/lists/join', { method: 'POST', token: otherToken, body: { token: 'nope' } });
   check('malformed invite → 400', r.status === 400, JSON.stringify(r));
 
@@ -257,6 +357,13 @@ try {
 
   r = await api('/api/lists/join', { method: 'POST', token: otherToken, body: { token: invite } });
   check('the replaced invite stops working → 404', r.status === 404, JSON.stringify(r));
+  r = await api(`/api/guest/list?token=${invite}`);
+  check('rotating the link revokes guest access immediately', r.status === 404);
+  r = await api(`/api/guest/list?token=${rotated}`);
+  check('the replacement invite permits guest viewing', r.status === 200);
+  r = await api(`/api/items?list=${user}`, { token: otherToken });
+  check('rotation preserves existing member access', r.status === 200);
+
 
   r = await api('/api/lists/members', { method: 'DELETE', token: otherToken, body: { list: user, member: other } });
   check('only the owner may remove members → 403', r.status === 403, JSON.stringify(r));
@@ -390,6 +497,9 @@ try {
   r = await api(`/api/lists/share?list=${encodeURIComponent(dacha.id)}`, { token });
   const dachaInvite = r.data?.token;
   check('the second list has an invite of its own', typeof dachaInvite === 'string' && dachaInvite !== rotated, JSON.stringify(r));
+  r = await api(`/api/guest/list?token=${dachaInvite}`);
+  check('guest invite opens only the named secondary list', r.data?.name === 'Дача и сад' && r.data?.items.length === 1 && r.data.items[0].name === 'грабли');
+
 
   r = await api(`/api/lists/share?list=${encodeURIComponent(dacha.id)}`, { token: otherToken });
   check('a stranger cannot ask for its invite → 403', r.status === 403, JSON.stringify(r));
@@ -413,6 +523,9 @@ try {
   check('the owner deletes the list → 200', r.data?.deleted === true, JSON.stringify(r));
   r = await api(`/api/items?list=${encodeURIComponent(dacha.id)}`, { token });
   check('a deleted list is gone → 403', r.status === 403, JSON.stringify(r));
+  r = await api(`/api/guest/list?token=${dachaInvite}`);
+  check('deleting a list also removes guest access', r.status === 404);
+
 
   // ---- realtime: the socket carries the same token as the REST calls ----
   const openSocket = (auth) =>
@@ -431,6 +544,10 @@ try {
     const anonymous = await openSocket({});
     check('socket without a token is refused', anonymous.outcome === 'unauthorized', anonymous.outcome);
     anonymous.socket.close();
+    const guestSocket = await openSocket({ token: rotated });
+    check('an invite cannot authenticate an editing socket', guestSocket.outcome === 'unauthorized');
+    guestSocket.socket.close();
+
 
     const authed = await openSocket({ token });
     check('socket with a token connects', authed.outcome === 'connected', authed.outcome);

@@ -34,7 +34,7 @@ import { ApiError, CLIENT_ID, getToken, notifyAuthExpired } from '../api/client'
 import { sameName } from '../utils/wordForms';
 import { useT } from '../i18n';
 
-const MAX_COUNT = 999;
+import { convertQuantity, isValidQuantity, quantityLimit, roundQuantity, type Unit } from '../../shared/quantity.js';
 
 const sameList = (a: Item[], b: Item[]) =>
   a.length === b.length &&
@@ -44,6 +44,7 @@ const sameList = (a: Item[], b: Item[]) =>
       item.name === b[i].name &&
       (item.note ?? null) === (b[i].note ?? null) &&
       item.count === b[i].count &&
+      (item.unit ?? null) === (b[i].unit ?? null) &&
       item.bought === b[i].bought,
   );
 
@@ -245,13 +246,14 @@ export const useShoppingList = (list: string, viewer: string) => {
   );
 
   const applyCount = useCallback(
-    async (id: string, delta: number) => {
+    async (id: string, delta: number, expectedUnit?: Unit | null) => {
       const before = itemsRef.current.find((item) => item.id === id);
+      if (!before || (expectedUnit !== undefined && expectedUnit !== (before.unit ?? null))) return;
       applyItems((prev) =>
         prev
           .map((item) =>
             item.id === id
-              ? { ...item, count: Math.min(MAX_COUNT, Math.max(0, item.count + delta)) }
+              ? { ...item, count: Math.min(quantityLimit(item.unit), Math.max(0, roundQuantity(item.count + delta))) }
               : item,
           )
           .filter((item) => item.count > 0),
@@ -260,7 +262,7 @@ export const useShoppingList = (list: string, viewer: string) => {
       // drawer like any other — show it there rather than only after a refetch.
       if (before && before.count + delta <= 0) noteDeleted(before);
       try {
-        await changeItemCount(id, list, delta);
+        await changeItemCount(id, list, delta, before.unit ?? null);
       } catch {
         loadItems();
       }
@@ -327,29 +329,39 @@ export const useShoppingList = (list: string, viewer: string) => {
   const changeCount = useCallback(
     async (id: string, delta: number) => {
       const item = itemsRef.current.find((i) => i.id === id);
-      if (!item) return;
-      if (item.count + delta <= 0) {
+      if (!item || !isValidQuantity(Math.abs(delta), item.unit)) return;
+      const next = Math.min(quantityLimit(item.unit), Math.max(0, roundQuantity(item.count + delta)));
+      const appliedDelta = roundQuantity(next - item.count);
+      if (!appliedDelta) return;
+      if (next <= 0) {
         pushUndo(item.name, { kind: 'restoreItems', items: [{ ...item }] });
       } else {
-        pushUndo(item.name, { kind: 'changeCount', id, delta: -delta });
+        pushUndo(item.name, { kind: 'changeCount', id, delta: -appliedDelta, unit: item.unit ?? null });
       }
-      await applyCount(id, delta);
+      await applyCount(id, appliedDelta);
     },
     [applyCount, pushUndo],
   );
 
   const addItem = useCallback(
-    async (name: string, count = 1) => {
+    async (name: string, count = 1, details: Pick<Item, 'unit' | 'note'> = {}) => {
       const trimmed = name.trim();
       if (!trimmed) return;
+      const unit = details.unit ?? null;
+      const note = details.note?.trim().replace(/\s+/g, ' ') || null;
+      if (!isValidQuantity(count, unit)) { toast.error(tRef.current('invalidQuantity')); return; }
+      if (note && note.length > 200) { toast.error(tRef.current('noteTooLong')); return; }
+      const candidates = itemsRef.current.filter((item) =>
+        (item.note ?? null) === note && isValidQuantity(convertQuantity(count, unit, item.unit), item.unit),
+      );
 
       // Saying "молоко" twice should bump the existing entry, not duplicate it.
       // Dictation rarely repeats a word in the same grammatical form, so a
       // near-match on the ending counts too — «молоко 4» then «два молока» is
       // one product, and used to become two rows. An exact match still wins.
       const existing =
-        itemsRef.current.find((item) => item.name.toLowerCase() === trimmed.toLowerCase()) ??
-        itemsRef.current.find((item) => sameName(item.name, trimmed));
+        candidates.find((item) => item.name.toLowerCase() === trimmed.toLowerCase()) ??
+        candidates.find((item) => sameName(item.name, trimmed));
       if (existing) {
         if (existing.bought) {
           // Re-adding something already checked off puts it back on the list.
@@ -357,13 +369,14 @@ export const useShoppingList = (list: string, viewer: string) => {
           await applyBought(existing.id, false);
           return;
         }
-        return changeCount(existing.id, count);
+        return changeCount(existing.id, convertQuantity(count, unit, existing.unit)!);
       }
 
       const newItem: Item = {
         id: generateItemId(),
         name: trimmed,
-        note: null,
+        note,
+        unit,
         count,
         list_id: list,
         bought: false,
@@ -400,11 +413,18 @@ export const useShoppingList = (list: string, viewer: string) => {
         const trimmed = edit.note?.trim() || null;
         if (trimmed !== (item.note ?? null)) next.note = trimmed;
       }
+      if (edit.count !== undefined || edit.unit !== undefined) {
+        const count = edit.count ?? item.count;
+        const unit = edit.unit === undefined ? (item.unit ?? null) : edit.unit;
+        if (!isValidQuantity(count, unit)) { toast.error(tRef.current('invalidQuantity')); return; }
+        if (count !== item.count || unit !== (item.unit ?? null)) { next.count = count; next.unit = unit; }
+      }
       if (Object.keys(next).length === 0) return;
 
       const previous: ItemEdit = {};
       if (next.name !== undefined) previous.name = item.name;
       if (next.note !== undefined) previous.note = item.note ?? null;
+      if (next.count !== undefined || next.unit !== undefined) { previous.count = item.count; previous.unit = item.unit ?? null; }
 
       pushUndo(item.name, { kind: 'editItem', id, edit: previous });
       await applyEdit(id, next);
@@ -503,7 +523,7 @@ export const useShoppingList = (list: string, viewer: string) => {
           for (const item of action.items) await applyAdd(item);
           return;
         case 'changeCount':
-          return applyCount(action.id, action.delta);
+          return applyCount(action.id, action.delta, action.unit ?? null);
         case 'setBought':
           return applyBought(action.id, action.bought);
         case 'editItem':
@@ -522,8 +542,9 @@ export const useShoppingList = (list: string, viewer: string) => {
    */
   const isApplicable = (action: UndoAction) => {
     switch (action.kind) {
-      case 'removeItem':
       case 'changeCount':
+        return itemsRef.current.some((item) => item.id === action.id && (action.unit ?? null) === (item.unit ?? null));
+      case 'removeItem':
       case 'setBought':
       case 'editItem':
         return itemsRef.current.some((item) => item.id === action.id);

@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
-import { parseBulkText, ParsedItem } from '../utils/speechParser';
+import { parseBulkText, parsedItemKey, ParsedItem } from '../utils/speechParser';
 import { useT } from '../i18n';
 import { Sheet } from './Sheet';
 import styles from '../App.module.css';
+import { formatQuantity } from '../utils/quantity';
+import { isValidQuantity } from '../../shared/quantity.js';
 
 type Props = {
   initialText: string;
@@ -16,12 +18,14 @@ type Props = {
  * carries stray lines that nobody wants on their shopping list.
  */
 export const ImportSheet = ({ initialText, onAdd, onClose }: Props) => {
-  const { t } = useT();
+  const { t, lang } = useT();
   const [text, setText] = useState(initialText);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
 
   const parsed = useMemo(() => parseBulkText(text), [text]);
-  const chosen = parsed.filter((item) => !skipped.has(item.name));
+  const chosen = parsed.filter((item) => !skipped.has(parsedItemKey(item)));
+
+  const invalid = chosen.some((item) => !isValidQuantity(item.count, item.unit) || (item.note?.length ?? 0) > 200);
 
   const toggle = (name: string) =>
     setSkipped((prev) => {
@@ -49,24 +53,25 @@ export const ImportSheet = ({ initialText, onAdd, onClose }: Props) => {
       ) : (
         <ul className={styles.importList}>
           {parsed.map((item) => (
-            <li key={item.name}>
+            <li key={parsedItemKey(item)}>
               <label>
                 <input
                   type="checkbox"
                   className={styles.toggle}
-                  checked={!skipped.has(item.name)}
-                  onChange={() => toggle(item.name)}
+                  checked={!skipped.has(parsedItemKey(item))}
+                  onChange={() => toggle(parsedItemKey(item))}
                 />
-                <span>{item.name}</span>
+                <span>{item.name}{item.note && <small className={styles.itemNote}> — {item.note}</small>}</span>
               </label>
-              {item.count > 1 && <span className={styles.itemCount}>×{item.count}</span>}
+              {(item.unit || item.count !== 1) && <span className={styles.itemCount}>{formatQuantity(item, lang)}</span>}
             </li>
           ))}
         </ul>
       )}
 
+      {invalid && <p className={styles.error} role="alert">{t('invalidImportQuantity')}</p>}
       <div className={styles.sheetActions}>
-        <button type="button" onClick={() => onAdd(chosen)} disabled={chosen.length === 0}>
+        <button type="button" onClick={() => onAdd(chosen)} disabled={chosen.length === 0 || invalid}>
           {t('importAdd', { count: chosen.length })}
         </button>
         <button type="button" onClick={onClose}>

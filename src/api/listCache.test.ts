@@ -22,6 +22,12 @@ describe('listCache', () => {
     expect(readSnapshot(LIST)?.items).toEqual([item]);
   });
 
+  it('round-trips fractional quantities, units and notes for offline viewing', () => {
+    const measured: Item = { ...item, count: 1.5, unit: 'l', note: 'Безлактозное' };
+    writeSnapshot(LIST, [measured]);
+    expect(readSnapshot(LIST)?.items).toEqual([measured]);
+  });
+
   it('reads a snapshot written before the list column was renamed', () => {
     // Exactly what the previous release wrote: the list was called `username`.
     localStorage.setItem(

@@ -6,7 +6,7 @@ Express 5 + SQLite (better-sqlite3) + Socket.IO on the backend.
 ## Features
 
 - **Voice input** (Web Speech API, Russian/English): "добавь молоко и 2 хлеба" →
-  items with quantities. Saying an existing item again bumps its count, and
+  items with quantities. Saying an existing item with the same note and compatible unit again bumps its quantity, and
   items dictated in one breath are applied in order so a repeated name lands as
   ×2 instead of two rows. An utterance is assembled before it is acted on:
   engines re-deliver a *growing prefix* of the same phrase as several "final"
@@ -16,12 +16,31 @@ Express 5 + SQLite (better-sqlite3) + Socket.IO on the backend.
   inflected differently — «молоко» comes back as «молока». Saying "дальше" (or
   pressing ⏎ Дальше) ends a phrase at once instead of waiting out the pause,
   and a run like «молоко 4 хлеб 2» becomes two items rather than one.
+- **Inline spoken notes**: "добавь два литра молока, заметка — Безлактозное,
+  в красной пачке" adds one item with its quantity and note. `заметка`,
+  `примечание`, `с заметкой` and `note` mark a note; all following text belongs
+  to the last item, including commas and command words. Start a new phrase,
+  say "следующий товар" / "next item", or use a semicolon to add another item.
+- **Units and fractions**: pieces, g/kg, ml/l and packs; "полкило помидоров",
+  "полтора литра молока", "500г сыра" and "две упаковки яиц" are understood.
+  Decimal dots and commas work, including pasted lists. Compatible weights and
+  volumes merge with conversion; different notes, incompatible units and
+  conversions requiring more than three decimal places remain separate rows.
+  "2 пачки масла по 200 г" keeps the package size in the name. The editor
+  converts g↔kg and ml↔l and accepts exact amounts. +/− use 100 g/ml, 0.1 kg/l,
+  or one piece/pack. Quantities are positive, up to 999 (999,999 for g/ml),
+  with up to three decimal places for weight/volume and whole numbers for
+  pieces/packs. Existing entries without a unit retain their ×N display.
+  Unit and quantity survive guest preview, offline storage, deletion and undo.
+  Stale increments carrying an outdated unit are rejected instead of applied
+  in the wrong unit. Migration 008 adds a nullable `unit`; existing rows remain
+  unchanged. The shared validation module is included in the runtime image.
 - **Gestures**: swipe a row right to check it off, left to delete; hold the
   drawn grip on the left of a row and drag to arrange the list in the order the
   shop is walked. A drag can only start from the grip and a swipe only wins once
   it clearly beats the vertical axis, so scrolling a long list never disturbs
   it. Arrow keys on a focused grip do the same reordering without a touchscreen.
-  Editing a row keeps what was typed when focus leaves it — Escape discards.
+  Closing the item editor keeps what was typed — Cancel and Escape discard.
 - **Several named lists**: an account keeps as many as it likes ("Продукты",
   "Дача"), each with its own items, history, members and invite link. The first
   list keeps `id = username`, so links handed out before this existed still work.
@@ -43,9 +62,15 @@ Express 5 + SQLite (better-sqlite3) + Socket.IO on the backend.
 - **Bought state**: tap an item to check it off — it sinks to the bottom with a
   strikethrough, most recently checked first; "Clear bought" wipes the cart
   after checkout. The screen stays awake (Wake Lock) while the mic is listening.
-- **Editing**: the ⋯ button on a row opens an inline editor for the name and a
-  short note ("тот, в красной пачке"), with delete tucked behind it so a mis-tap
-  next to "−" cannot wipe an item.
+- **Editing and notes**: tap the note below an item or "Add a note" to open a
+  large text field; ⋯ opens the same editor for the name, quantity and unit. Dictation appends plain
+  text to the note, without interpreting shopping commands. Finish dictation to
+  correct the text, clear it, or save; saving waits for the final speech result.
+  Notes stay within 200 characters, with an explicit overflow message instead
+  of truncating speech. The close button and backdrop save; Cancel and Escape
+  discard the draft and stop the mic. List dictation pauses when the editor
+  opens. Voice support follows the browser; typing is always available. Delete
+  stays in the editor so a mis-tap next to "−" cannot wipe an item.
 - **Eyes-free confirmation**: short, distinguishable tones — rising for an item
   added, falling for one removed, a blip for a tick, a low buzz for speech that
   could not be parsed — plus vibration, which stays on even when the tones are
@@ -61,9 +86,15 @@ Express 5 + SQLite (better-sqlite3) + Socket.IO on the backend.
   more than three deep, and the chatty ones (speech results, item actions) reuse
   an id so a burst replaces itself instead of burying the list.
 - **Shared lists**: "🔗" hands out an invite link carrying an unguessable token.
-  Opening it once grants access; changes then sync live over WebSockets and a 👀
-  row shows who is viewing the list. The owner can list members, remove any of
+  Without an account it opens a guest preview; logging in or registering grants
+  editing access. Members sync live over WebSockets and a 👀 row shows who is
+  viewing the list. The owner can list members, remove any of
   them, or replace the link.
+- **Guest mode**: invite links open a view-only list without registration, with
+  names, quantities, notes and bought items. A banner offers registration or
+  login and returns to the same list with editing access. Guests refresh every
+  15 seconds while the page is visible, with no persistent snapshots, editing,
+  history, trash, voice input or offline mutation replay.
 - **Web Push**: the 🔔 bell subscribes a device to a list — others' changes
   arrive as a batched notification (silent when the app is focused). Requires
   VAPID keys in `.env`; the bell hides itself when unconfigured.
@@ -95,17 +126,26 @@ src/
                       useDragReorder, useTheme
   components/         Login, ShoppingList, ItemRow (swipe), sheets, DeletedDrawer
   i18n.ts             ru/en dictionary
-  utils/speechParser  spoken text → [{ name, count }]
+  utils/speechParser  spoken text → [{ name, count, unit?, note? }]
   utils/transcript    merges the fragments an engine calls "final" into one phrase
 ```
 
 ## Access model
 
-A list is an opaque id with a name and an owner. Reading or writing it requires
-being that owner or a member, and membership comes from redeeming an invite
-token (`?join=TOKEN`). The owner can revoke a member or rotate the token, which
-invalidates every copy of the old link. The same check gates Socket.IO rooms and
-push subscriptions.
+A list is an opaque id with a name and an owner. Editing requires being its
+owner or a member; membership comes from redeeming an invite token
+(`?join=TOKEN`) after authentication. Without an account, the same invite grants
+only a guest preview through `GET /api/guest/list?token=TOKEN`. This endpoint
+returns the list name and live item fields, checks the token on every request,
+sets `Cache-Control: no-store`, and limits reads per IP. It creates no session
+or membership. All mutations, history, trash, Socket.IO rooms and push
+subscriptions still require account authentication and list access.
+
+The owner can revoke a member or rotate the token. Rotation invalidates every
+copy of the old link immediately for API reads; an open guest preview clears
+on its next refresh. Existing members keep access. Removing a member does not
+revoke a link they already have; rotate the link too to close guest viewing
+and prevent them from joining again.
 
 Lists used to *be* their owner's username, and everything that referenced one
 was named accordingly until migration 007 renamed the columns to `list_id` and

@@ -1,5 +1,6 @@
 import { request, ApiError, NetworkError } from './client';
 import { enqueueMutation } from './offlineQueue';
+import type { Unit } from '../../shared/quantity.js';
 
 export type Item = {
   id: string;
@@ -7,6 +8,7 @@ export type Item = {
   /** Which one to grab: "тот, в красной пачке". */
   note?: string | null;
   count: number;
+  unit?: Unit | null;
   /** The list this belongs to. */
   list_id: string;
   bought: boolean;
@@ -21,6 +23,8 @@ export type Item = {
 export type ItemEdit = {
   name?: string;
   note?: string | null;
+  count?: number;
+  unit?: Unit | null;
 };
 
 export type Suggestion = {
@@ -68,8 +72,10 @@ export const fetchSuggestions = (list: string, q = ''): Promise<Suggestion[]> =>
 export const createItem = ({ list_id, ...item }: Item): Promise<void> =>
   sendOrQueue('/api/items', 'POST', { ...item, list: list_id });
 
-export const changeItemCount = (id: string, list: string, delta: number): Promise<void> =>
-  sendOrQueue(`/api/items/${encodeURIComponent(id)}/count`, 'PATCH', { list, delta });
+export const changeItemCount = (id: string, list: string, delta: number, expectedUnit?: Unit | null): Promise<void> =>
+  sendOrQueue(`/api/items/${encodeURIComponent(id)}/count`, 'PATCH', {
+    list, delta, ...(expectedUnit !== undefined ? { expectedUnit } : {}),
+  });
 
 export const updateItem = (id: string, list: string, edit: ItemEdit): Promise<void> =>
   sendOrQueue(`/api/items/${encodeURIComponent(id)}`, 'PATCH', { list, ...edit });

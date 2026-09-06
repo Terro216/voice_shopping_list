@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import App from './App';
 
 // The socket is a live connection; in a test it would only add noise.
@@ -33,6 +33,7 @@ const routes: Record<string, Handler> = {
 };
 
 beforeEach(() => {
+  window.history.replaceState({}, '', '/');
   // react-hot-toast asks the browser about reduced motion on mount.
   vi.stubGlobal(
     'matchMedia',
@@ -55,7 +56,98 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  window.history.replaceState({}, '', '/');
   vi.unstubAllGlobals();
+});
+
+describe('guest invitation', () => {
+  const invite = 'a'.repeat(24);
+  const preview = { name: 'На выходные', items: items.map((item) => ({ ...item, note: 'В красной пачке' })) };
+
+  beforeEach(() => {
+    localStorage.removeItem('username');
+    localStorage.removeItem('token');
+    window.history.replaceState({}, '', `/?join=${invite}`);
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = new URL(String(input), 'http://localhost').pathname;
+      if (path === '/api/guest/list') return json(preview) as Response;
+      if (path === '/api/auth/register' || path === '/api/auth/login') {
+        return json({ username: 'ann', token: 'new-token' }) as Response;
+      }
+      if (path === '/api/lists/join') return json({ list: 'weekend', name: preview.name }) as Response;
+      return json(routes[path]?.(String(input), init) ?? { success: true }) as Response;
+    });
+  });
+
+  it('opens an invite without logging in or granting editing access', async () => {
+    render(<App />);
+    await screen.findByRole('heading', { name: preview.name });
+    expect(screen.getByText('Гостевой режим · Только просмотр')).toBeTruthy();
+    expect(screen.getByText('Зарегистрируйтесь, чтобы разблокировать весь функционал')).toBeTruthy();
+    expect(screen.getByText('×2')).toBeTruthy();
+    expect(screen.getAllByText('В красной пачке')).toHaveLength(2);
+    const rows = screen.getAllByRole('listitem');
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(within(row).queryByRole('button')).toBeNull();
+      fireEvent.click(row);
+      fireEvent.touchStart(row, { touches: [{ clientX: 200, clientY: 20 }] });
+      fireEvent.touchEnd(row, { changedTouches: [{ clientX: 0, clientY: 20 }] });
+    }
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.queryByText('Удалённое')).toBeNull();
+    expect(vi.mocked(fetch).mock.calls.every(([url, init]) =>
+      String(url) === `/api/guest/list?token=${invite}` && init?.method === 'GET',
+    )).toBe(true);
+    expect(localStorage.getItem('token')).toBeNull();
+  });
+
+  it.each([
+    ['Зарегистрироваться', 'Регистрация', '/api/auth/register', 'new-password'],
+    ['Войти', 'Войти', '/api/auth/login', 'current-password'],
+  ])('continues from %s into the same shared list', async (cta, submit, endpoint, autocomplete) => {
+    render(<App />);
+    await screen.findByText('молоко');
+    fireEvent.click(screen.getByRole('button', { name: cta }));
+    expect(screen.getByLabelText('Пароль').getAttribute('autocomplete')).toBe(autocomplete);
+    fireEvent.change(screen.getByLabelText('Имя пользователя'), { target: { value: 'ann' } });
+    fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'password123' } });
+    fireEvent.submit(screen.getByRole('button', { name: submit }).closest('form')!);
+    await waitFor(() => expect(window.location.search).toBe('?list=weekend'));
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => url === endpoint)).toBe(true);
+    const join = vi.mocked(fetch).mock.calls.find(([url]) => url === '/api/lists/join');
+    expect(JSON.parse(join![1]!.body as string)).toEqual({ token: invite });
+    expect(join![1]!.headers).toMatchObject({ Authorization: 'Bearer new-token' });
+    expect(screen.queryByText('Гостевой режим · Только просмотр')).toBeNull();
+    expect(await screen.findByPlaceholderText('Добавить вручную…')).toBeTruthy();
+  });
+
+  it('can return from registration to the preview without losing the invite', async () => {
+    render(<App />);
+    await screen.findByText('молоко');
+    fireEvent.click(screen.getByRole('button', { name: 'Зарегистрироваться' }));
+    fireEvent.click(screen.getByRole('button', { name: '← Вернуться к просмотру списка' }));
+    expect(await screen.findByText('молоко')).toBeTruthy();
+    expect(window.location.search).toBe(`?join=${invite}`);
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => url === '/api/lists/join')).toBe(false);
+  });
+
+  it('preserves the invitation when a stored session expires during joining', async () => {
+    localStorage.setItem('username', 'ann');
+    localStorage.setItem('token', 'expired');
+    const respond = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input) === '/api/lists/join') {
+        return { ...json({ error: 'Invalid token' }), ok: false, status: 401 } as Response;
+      }
+      return respond(input, init);
+    });
+    render(<App />);
+    expect(await screen.findByText('Гостевой режим · Только просмотр')).toBeTruthy();
+    expect(await screen.findByText('молоко')).toBeTruthy();
+    expect(window.location.search).toBe(`?join=${invite}`);
+    expect(localStorage.getItem('token')).toBeNull();
+  });
 });
 
 describe('App', () => {

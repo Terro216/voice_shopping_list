@@ -5,6 +5,8 @@ import styles from '../App.module.css';
 type Props = {
   title: string;
   onClose: () => void;
+  onEscape?: () => void;
+  initialFocusRef?: React.RefObject<HTMLElement | null>;
   children: React.ReactNode;
 };
 
@@ -12,7 +14,7 @@ const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /** Modal panel used by the share, settings, help and list screens. */
-export const Sheet = ({ title, onClose, children }: Props) => {
+export const Sheet = ({ title, onClose, onEscape, initialFocusRef, children }: Props) => {
   const { t } = useT();
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -21,11 +23,11 @@ export const Sheet = ({ title, onClose, children }: Props) => {
     // Whatever opened the sheet gets the focus back when it closes, so a
     // keyboard or screen-reader user is not dumped at the top of the page.
     const opener = document.activeElement as HTMLElement | null;
-    panel?.focus();
+    (initialFocusRef?.current ?? panel)?.focus();
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        (onEscape ?? onClose)();
         return;
       }
       if (e.key !== 'Tab' || !panel) return;
@@ -59,7 +61,7 @@ export const Sheet = ({ title, onClose, children }: Props) => {
       document.removeEventListener('keydown', onKeyDown);
       opener?.focus?.();
     };
-  }, [onClose]);
+  }, [onClose, onEscape, initialFocusRef]);
 
   return (
     <div className={styles.sheetBackdrop} onClick={onClose}>

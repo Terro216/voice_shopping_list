@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Item } from '../api/items';
 import { useT } from '../i18n';
 import styles from '../App.module.css';
+import { formatQuantity } from '../utils/quantity';
 
 type Props = {
   items: Item[];
@@ -18,7 +19,7 @@ type Props = {
  * Collapsed by default: it is a safety net, not part of the shopping.
  */
 export const DeletedDrawer = ({ items, onVisibilityChange, onRestore, onPurge }: Props) => {
-  const { t } = useT();
+  const { t, lang } = useT();
   const [open, setOpen] = useState(false);
 
   // The contents are only worth fetching, and keeping fresh, while somebody is
@@ -50,7 +51,7 @@ export const DeletedDrawer = ({ items, onVisibilityChange, onRestore, onPurge }:
               <li key={item.id}>
                 <span className={styles.deletedName}>
                   {item.name}
-                  {item.count > 1 && <span className={styles.itemCount}> ×{item.count}</span>}
+                  {(item.unit || item.count !== 1) && <span className={styles.itemCount}> {formatQuantity(item, lang)}</span>}
                 </span>
                 <button type="button" onClick={() => onRestore(item.id)}>
                   {t('restore')}

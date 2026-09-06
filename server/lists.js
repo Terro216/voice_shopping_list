@@ -4,9 +4,9 @@ import { MAX_LIST_NAME_LENGTH, MAX_LISTS_PER_OWNER } from "./validation.js";
 
 /**
  * Access model: a list is an opaque id with a display name and an owner.
- * Reading or editing it requires being that owner or an explicitly granted
- * member, and membership is granted by opening an invite link carrying an
- * unguessable token.
+ * Editing it requires being that owner or an explicitly granted member.
+ * An unguessable invite token allows guests to preview the list; redeeming it
+ * after signing in grants membership.
  *
  * Historical note: lists used to *be* their owner's username, and the columns
  * that reference one were named accordingly until migration 007 renamed them

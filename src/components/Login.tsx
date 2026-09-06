@@ -7,13 +7,15 @@ type Props = {
   onLogin: (username: string, token: string) => void;
   lang: Lang;
   setLang: (lang: Lang) => void;
+  initialMode?: 'login' | 'register';
+  onBackToGuest?: () => void;
 };
 
-export const Login = ({ onLogin, lang, setLang }: Props) => {
+export const Login = ({ onLogin, lang, setLang, initialMode = 'login', onBackToGuest }: Props) => {
   const { t } = useT();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [isRegistering, setIsRegistering] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(initialMode === 'register');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -57,13 +59,19 @@ export const Login = ({ onLogin, lang, setLang }: Props) => {
           ))}
         </select>
       </div>
-      <p>{t('loginIntro')}</p>
+      {onBackToGuest && (
+        <button type="button" className={styles.linkButton} onClick={onBackToGuest} disabled={isSubmitting}>
+          {t('backToGuest')}
+        </button>
+      )}
+      <p>{t(onBackToGuest ? 'guestAuthIntro' : 'loginIntro')}</p>
 
       <form className={styles.loginForm} onSubmit={handleSubmit}>
         <input
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           placeholder={t('username')}
+          aria-label={t('username')}
           autoComplete="username"
           autoFocus
         />
@@ -72,6 +80,7 @@ export const Login = ({ onLogin, lang, setLang }: Props) => {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder={isRegistering ? t('passwordMin') : t('password')}
+          aria-label={t('password')}
           autoComplete={isRegistering ? 'new-password' : 'current-password'}
         />
         <button type="submit" disabled={isSubmitting}>

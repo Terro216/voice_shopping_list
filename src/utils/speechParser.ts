@@ -1,6 +1,10 @@
+import { quantityLimit, roundQuantity, type Unit } from '../../shared/quantity.js';
+
 export type ParsedItem = {
   name: string;
   count: number;
+  unit?: Unit;
+  note?: string;
 };
 
 export type SpeechCommand =
@@ -41,7 +45,7 @@ const TRIGGER_WORDS = [
 const SEPARATOR_RE = /(?:\s+и\s+|\s+да\s+|\s+and\s+|\s+plus\s+|,)/;
 
 const NUMBER_WORDS: Record<string, number> = {
-  один: 1, одна: 1, одну: 1,
+  ноль: 0, один: 1, одна: 1, одну: 1,
   два: 2, две: 2, пара: 2,
   три: 3,
   четыре: 4,
@@ -50,7 +54,13 @@ const NUMBER_WORDS: Record<string, number> = {
   семь: 7,
   восемь: 8,
   девять: 9,
-  десять: 10,
+  десять: 10, одиннадцать: 11, двенадцать: 12, тринадцать: 13, четырнадцать: 14,
+  пятнадцать: 15, шестнадцать: 16, семнадцать: 17, восемнадцать: 18, девятнадцать: 19,
+  двадцать: 20, тридцать: 30, сорок: 40, пятьдесят: 50, шестьдесят: 60,
+  семьдесят: 70, восемьдесят: 80, девяносто: 90,
+  сто: 100, двести: 200, триста: 300, четыреста: 400, пятьсот: 500,
+  шестьсот: 600, семьсот: 700, восемьсот: 800, девятьсот: 900,
+  тысяча: 1000, полтора: 1.5, полторы: 1.5, половина: 0.5, пол: 0.5,
   one: 1,
   two: 2, couple: 2,
   three: 3,
@@ -60,81 +70,112 @@ const NUMBER_WORDS: Record<string, number> = {
   seven: 7,
   eight: 8,
   nine: 9,
-  ten: 10,
+  ten: 10, half: 0.5, a: 1, an: 1,
 };
 
-// Only treat small numbers as quantities: in "500 грамм сыра" the number is a
-// measure, not a count of list entries, so it stays part of the name.
+// Keep large bare numbers in product names, but allow full numeric quantities
+// next to an explicit unit (including grams and millilitres above 999).
 const MAX_SPOKEN_COUNT = 20;
+const UNIT_WORDS: Record<Unit, string[]> = {
+  pcs: ['шт', 'штука', 'штуки', 'штук', 'штуку', 'pcs', 'pc', 'piece', 'pieces'],
+  g: ['г', 'гр', 'грамм', 'грамма', 'граммов', 'g', 'gram', 'grams'],
+  kg: ['кг', 'кило', 'килограмм', 'килограмма', 'килограммов', 'kg', 'kilo', 'kilos', 'kilogram', 'kilograms'],
+  ml: ['мл', 'миллилитр', 'миллилитра', 'миллилитров', 'ml', 'milliliter', 'milliliters', 'millilitre', 'millilitres'],
+  l: ['л', 'литр', 'литра', 'литров', 'l', 'liter', 'liters', 'litre', 'litres'],
+  pack: ['уп', 'упак', 'упаковка', 'упаковки', 'упаковок', 'упаковку', 'пачка', 'пачки', 'пачек', 'пачку', 'pack', 'packs', 'package', 'packages'],
+};
+const unitOf = (token: string | undefined): Unit | undefined =>
+  (Object.keys(UNIT_WORDS) as Unit[]).find((unit) => UNIT_WORDS[unit].includes((token ?? '').replace(/\.$/, '')));
 
-const parseCountToken = (token: string): number | null => {
-  const value = /^\d+$/.test(token) ? Number(token) : NUMBER_WORDS[token];
-  if (value === undefined || value < 1 || value > MAX_SPOKEN_COUNT) return null;
-  return value;
+type QuantityToken = { count: number; unit?: Unit; size: number };
+
+const readQuantity = (tokens: string[], index: number): QuantityToken | null => {
+  const first = tokens[index];
+  if (['полкило', 'полкилограмма', 'полкилограммов'].includes(first)) return { count: 0.5, unit: 'kg', size: 1 };
+  if (['поллитра', 'пол-литра'].includes(first)) return { count: 0.5, unit: 'l', size: 1 };
+  const bareUnit = unitOf(first);
+  if (bareUnit) return { count: 1, unit: bareUnit, size: 1 };
+
+  let count: number;
+  let size = 1;
+  if (/^-?\d+(?:\.\d+)?$/.test(first)) count = Number(first);
+  else {
+    if (NUMBER_WORDS[first] === undefined) return null;
+    count = NUMBER_WORDS[first];
+    let previous = count;
+    // «двести пятьдесят» and «двадцать пять», without eating two counts
+    // belonging to adjacent products.
+    while (previous >= 20 && NUMBER_WORDS[tokens[index + size]] > 0 && NUMBER_WORDS[tokens[index + size]] < previous) {
+      previous = NUMBER_WORDS[tokens[index + size]];
+      count += previous;
+      size++;
+    }
+  }
+  if (tokens[index + size] === 'с' && ['половиной', 'половиною'].includes(tokens[index + size + 1])) {
+    count += 0.5;
+    size += 2;
+  }
+  // "half a kilo", "half an ..."
+  if (count === 0.5 && ['a', 'an'].includes(tokens[index + size])) size++;
+  const unit = unitOf(tokens[index + size]);
+  if (unit) return { count, unit, size: size + (tokens[index + size + 1] === 'of' ? 2 : 1) };
+  if (!Number.isInteger(count) || count < 1 || count > MAX_SPOKEN_COUNT) return null;
+  return { count, size };
 };
 
-/**
- * One run of speech between separators, which may still hold several items:
- * people dictate «молоко 4 хлеб 2» in one breath, without an "and" anywhere.
- * Read as a single item that used to become «молоко 4 хлеб» ×2.
- *
- * A number is read as belonging to the name it touches: before a name it
- * counts that name, after one it closes it. A name already carrying a leading
- * count is finished by the next number, which then starts the item after it.
- */
 const parseSegmentItems = (segment: string): ParsedItem[] => {
-  const tokens = segment.split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return [];
-  // A segment that is nothing but a number is a name: saying «2» on its own
-  // asks for an item called «2», not for a quantity of nothing.
+  const tokens = segment.trim().replace(/[.!?,:]+$/, '').split(/\s+/).filter(Boolean);
+  if (!tokens.length) return [];
   if (tokens.length === 1) return [{ name: tokens[0], count: 1 }];
-
   const items: ParsedItem[] = [];
   let words: string[] = [];
-  let leading: number | null = null;
-
-  for (const token of tokens) {
-    const count = parseCountToken(token);
-    if (count === null) {
-      words.push(token);
-      continue;
-    }
-    if (words.length === 0) {
-      leading = count; // nothing to attach it to yet — it counts what follows
-      continue;
-    }
-    items.push({ name: words.join(' '), count: leading ?? count });
+  let leading: Omit<QuantityToken, 'size'> | null = null;
+  for (let index = 0; index < tokens.length;) {
+    // A package size is part of the description: "2 пачки масла по 200 г".
+    if (tokens[index] === 'по') { words.push(...tokens.slice(index)); break; }
+    const quantity = readQuantity(tokens, index);
+    if (!quantity) { words.push(tokens[index++]); continue; }
+    const { size, ...value } = quantity;
+    index += size;
+    if (!words.length) { leading = value; continue; }
+    items.push({ name: words.join(' '), ...(leading ?? value) });
     words = [];
-    leading = leading === null ? null : count;
+    leading = leading === null ? null : value;
   }
-
-  if (words.length > 0) {
-    items.push({ name: words.join(' '), count: leading ?? 1 });
-  } else if (items.length === 0) {
-    // Numbers and nothing else: keep the words rather than drop the utterance.
-    return [{ name: tokens.join(' '), count: 1 }];
-  }
-
+  if (words.length) items.push({ name: words.join(' '), ...(leading ?? { count: 1 }) });
+  else if (!items.length) return [{ name: tokens.join(' '), count: 1 }];
   return items;
 };
 
-export const parseSpeechText = (text: string): ParsedItem[] => {
-  let cleaned = text.toLowerCase();
-
-  for (const phrase of TRIGGER_PHRASES) {
-    cleaned = cleaned.split(phrase).join(' ');
-  }
-  for (const word of TRIGGER_WORDS) {
-    cleaned = cleaned.replace(new RegExp(`(^|\\s)${word}(?=\\s|$)`, 'gu'), ' ');
-  }
-
-  return cleaned.split(SEPARATOR_RE).flatMap(parseSegmentItems);
+// Explicit marker: everything after it belongs to the last item's note,
+// including commas, conjunctions and words that otherwise trigger commands.
+const NOTE_MARKER = /(?:^|[\s,])(?:с\s+заметкой|заметка|примечание|note)(?=\s|[:—–-]|$)\s*[:—–-]?\s*/iu;
+const splitNote = (text: string) => {
+  const match = NOTE_MARKER.exec(text);
+  return match
+    ? { body: text.slice(0, match.index), note: text.slice(match.index + match[0].length).trim().replace(/,\s*$/, '') }
+    : { body: text, note: undefined };
 };
 
-// Bullets and numbering people paste along with their lists.
-const LIST_MARKER_RE = /^\s*(?:[-*•·–—]+|\d+[.)])\s*/;
+export const parsedItemKey = (item: ParsedItem) => JSON.stringify([item.name.toLowerCase(), item.unit ?? '', item.note ?? '']);
 
-const MAX_BULK_COUNT = 999;
+export const parseSpeechText = (text: string): ParsedItem[] =>
+  text.split(/;|\s+(?:следующий товар|next item)\s+/iu).flatMap((phrase) => {
+    const { body, note } = splitNote(phrase);
+    // Decimal commas must be protected before commas become item separators.
+    let cleaned = body.toLowerCase().replace(/(\d),(\d)/g, '$1.$2')
+      .replace(/(\d)(?=(?:кг|гр|г|мл|л|kg|ml|g|l)(?:\s|[.,!?]|$))/gu, '$1 ');
+    for (const trigger of TRIGGER_PHRASES) cleaned = cleaned.split(trigger).join(' ');
+    for (const word of TRIGGER_WORDS) {
+      cleaned = cleaned.replace(new RegExp(`(^|\\s)${word}(?=\\s|$)`, 'gu'), ' ');
+    }
+    const items = cleaned.split(SEPARATOR_RE).flatMap(parseSegmentItems);
+    if (note !== undefined && items.length) items[items.length - 1].note = note;
+    return items;
+  });
+
+// Bullets and numbering people paste along with their lists.
+const LIST_MARKER_RE = /^\s*(?:[-*•·–—]+\s+|\d+[.)](?:\s+|$))/;
 
 /**
  * Pasted or shared multi-line text → items. Each line goes through the same
@@ -150,10 +191,10 @@ export const parseBulkText = (text: string): ParsedItem[] => {
     if (!line || /^[a-z][a-z0-9+.-]*:\/\//i.test(line)) continue;
 
     for (const item of parseSpeechText(line)) {
-      const key = item.name.toLowerCase();
+      const key = parsedItemKey(item);
       const existing = merged.get(key);
       if (existing) {
-        existing.count = Math.min(MAX_BULK_COUNT, existing.count + item.count);
+        existing.count = Math.min(quantityLimit(item.unit), roundQuantity(existing.count + item.count));
       } else {
         merged.set(key, { ...item });
       }
@@ -167,7 +208,7 @@ export const parseBulkText = (text: string): ParsedItem[] => {
 // "купил/купила" (past — "I bought it") checks off.
 const UNDO_RE = /^(отмена|отмени|отменить|верни как было|undo|cancel)[.!]?$/;
 
-const CLEAR_BOUGHT_RE = /(очисти|очистить|убери|убрать|clear)\s+(всё\s+|все\s+)?(купленн\S*|bought)/;
+const CLEAR_BOUGHT_RE = /^(очисти|очистить|убери|убрать|clear)\s+(всё\s+|все\s+)?(купленн\S*|bought)/;
 
 const CHECK_RE =
   /^(вычеркни|вычеркнуть|зачеркни|отметь|купила|купили|купил|взяла|взяли|взял|check off|check|bought|got)\s+(.+)$/;
@@ -179,7 +220,7 @@ const REMOVE_RE = /^(убери|убрать|удали|удалить|выки�
 const toQueries = (rest: string): string[] => parseSpeechText(rest).map((item) => item.name);
 
 export const parseSpeechCommand = (text: string): SpeechCommand => {
-  const cleaned = text.toLowerCase().trim();
+  const cleaned = splitNote(text).body.toLowerCase().trim();
 
   if (UNDO_RE.test(cleaned)) return { type: 'undo' };
   if (CLEAR_BOUGHT_RE.test(cleaned)) return { type: 'clearBought' };
@@ -190,5 +231,5 @@ export const parseSpeechCommand = (text: string): SpeechCommand => {
   const remove = cleaned.match(REMOVE_RE);
   if (remove) return { type: 'remove', queries: toQueries(remove[2]) };
 
-  return { type: 'add', items: parseSpeechText(cleaned) };
+  return { type: 'add', items: parseSpeechText(text) };
 };

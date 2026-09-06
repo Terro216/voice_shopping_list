@@ -36,6 +36,7 @@
 }
 
 .container input,
+.container textarea,
 .container select {
   min-height: 44px;
   padding: 0.5rem 0.6rem;
@@ -196,6 +197,56 @@
 
 .list {
   width: 100%;
+}
+
+.guestBanner {
+  width: 100%;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  line-height: 1.45;
+}
+
+.guestBanner p {
+  margin: 0.4rem 0 0.75rem;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.guestActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.guestActions .guestRegister {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-color: var(--accent);
+}
+
+.guestActions .guestRegister:hover {
+  background: var(--accent);
+  filter: brightness(0.95);
+}
+
+.guestItems {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.guestRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 52px;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--hairline);
 }
 
 .item {
@@ -391,13 +442,76 @@
   width: 100%;
 }
 
+.editorField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
+  font-size: 0.9rem;
+}
+
+.quantityFields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.quantityFields select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+}
+
+.editorField textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 110px;
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.noteTools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.noteCount {
+  margin-left: auto;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.container .noteLink {
+  display: block;
+  max-width: 100%;
+  padding: 0.4rem 0.5rem;
+  margin-bottom: 0.25rem;
+  background: none;
+  border: none;
+  text-align: left;
+  color: var(--text-soft);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
 .itemEditor input {
-  flex: 1 1 10rem;
+  width: 100%;
   min-width: 0;
 }
 
 .itemEditorActions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   flex-shrink: 0;
 }

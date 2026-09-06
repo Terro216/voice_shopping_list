@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Toaster, ToastBar, toast, useToasterStore } from 'react-hot-toast';
 import { Login } from './components/Login';
 import { ShoppingList } from './components/ShoppingList';
-import { AUTH_EXPIRED_EVENT, RATE_LIMITED_EVENT } from './api/client';
+import { GuestList } from './components/GuestList';
+import { ApiError, AUTH_EXPIRED_EVENT, RATE_LIMITED_EVENT } from './api/client';
 import { fetchLists, joinList, type ListSummary } from './api/lists';
 import { clearSnapshots } from './api/listCache';
 import { clearUndoStacks } from './api/undoStack';
@@ -80,6 +81,8 @@ function App() {
   const { theme, setTheme } = useTheme();
   const [lists, setLists] = useState<ListSummary[]>([]);
   const [activeList, setActiveList] = useState<string | null>(readListParam);
+  const [authMode, setAuthMode] = useState<'login' | 'register' | null>(null);
+  const invite = new URLSearchParams(window.location.search).get('join');
 
   const t = useMemo(() => translator(lang), [lang]);
   const langValue = useMemo(() => ({ lang, t }), [lang, t]);
@@ -95,9 +98,10 @@ function App() {
     // Deliberately keep the query string: someone opening a share link must
     // land on that list after logging in, not on their own.
     setSession({ username, token });
+    setAuthMode(null);
   };
 
-  const handleLogout = useCallback(() => {
+  const handleLogout = useCallback((preserveInvite = false) => {
     localStorage.removeItem('username');
     localStorage.removeItem('token');
     // The cached lists are somebody's shopping habits — they should not sit in
@@ -108,7 +112,8 @@ function App() {
     setSession(null);
     setLists([]);
     setActiveList(null);
-    writeListParam(null);
+    setAuthMode(null);
+    if (!preserveInvite) writeListParam(null);
   }, []);
 
   // Returns the request so a caller that needs the catalog to be current before
@@ -126,7 +131,7 @@ function App() {
 
   useEffect(() => {
     const onAuthExpired = () => {
-      handleLogout();
+      handleLogout(true);
       toast.error(t('sessionExpired'));
     };
     // One id: a burst of throttled requests is still one thing to say.
@@ -174,6 +179,7 @@ function App() {
   // the list is opened — the list id alone no longer lets anyone in.
   useEffect(() => {
     if (!session) return;
+    let cancelled = false;
     const token = new URLSearchParams(window.location.search).get('join');
     if (!token) {
       refreshLists();
@@ -181,15 +187,19 @@ function App() {
     }
     joinList(token)
       .then(({ list, name }) => {
+        if (cancelled) return;
         toast.success(t('joinedList', { list: name || list }));
         setActiveList(list);
         writeListParam(list);
       })
-      .catch(() => {
+      .catch((err) => {
+        // Expired sessions fall back to the guest preview with the link intact.
+        if (cancelled || (err instanceof ApiError && err.status === 401)) return;
         toast.error(t('joinFailed'));
         writeListParam(readListParam());
       })
-      .finally(refreshLists);
+      .finally(() => { if (!cancelled) void refreshLists(); });
+    return () => { cancelled = true; };
   }, [session, refreshLists, t]);
 
   const selectList = useCallback(
@@ -205,7 +215,17 @@ function App() {
     return (
       <LangProvider value={langValue}>
         <Notifications />
-        <Login onLogin={handleLogin} lang={lang} setLang={setLang} />
+        {invite !== null && authMode === null ? (
+          <GuestList key={invite} token={invite} lang={lang} setLang={setLang} onAuthenticate={setAuthMode} />
+        ) : (
+          <Login
+            onLogin={handleLogin}
+            lang={lang}
+            setLang={setLang}
+            initialMode={authMode ?? 'login'}
+            onBackToGuest={invite !== null ? () => setAuthMode(null) : undefined}
+          />
+        )}
       </LangProvider>
     );
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ItemRow } from './ItemRow';
 import type { Item } from '../api/items';
 
@@ -108,22 +108,18 @@ describe('ItemRow gestures', () => {
     expect(handlers.onRemove).not.toHaveBeenCalled();
   });
 
-  it('keeps a note when focus leaves the editor', () => {
+  it('keeps a note when the editor is closed', async () => {
     const { handlers } = setup();
     fireEvent.click(screen.getByLabelText(/Изменить|^Edit$/));
 
-    const note = screen.getByLabelText(/Заметка|Note:/);
+    const note = screen.getByRole('textbox', { name: /Заметка|Note:/ });
     fireEvent.change(note, { target: { value: 'тот, в красной пачке' } });
 
-    // Tapping the page rather than "Сохранить" is how people leave a form they
-    // consider finished; it used to discard the note without a word.
-    fireEvent.blur(note, { relatedTarget: null });
-
-    expect(handlers.onEdit).toHaveBeenCalledWith('i1', {
-      name: 'молоко',
+    fireEvent.click(screen.getByRole('button', { name: 'Закрыть' }));
+    await waitFor(() => expect(handlers.onEdit).toHaveBeenCalledWith('i1', {
       note: 'тот, в красной пачке',
-    });
-    expect(screen.queryByLabelText(/Заметка|Note:/)).toBeNull();
+    }));
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('does not save while focus is still moving inside the editor', () => {
@@ -131,11 +127,23 @@ describe('ItemRow gestures', () => {
     fireEvent.click(screen.getByLabelText(/Изменить|^Edit$/));
 
     const name = screen.getByLabelText(/Название позиции|Item name/);
-    const note = screen.getByLabelText(/Заметка|Note:/);
+    const note = screen.getByRole('textbox', { name: /Заметка|Note:/ });
     fireEvent.blur(name, { relatedTarget: note });
 
     expect(handlers.onEdit).not.toHaveBeenCalled();
     expect(note).toBeTruthy();
+  });
+
+  it('opens a note directly without checking off the item and pauses list speech', () => {
+    const handlers = {
+      onToggleBought: vi.fn(), onIncrement: vi.fn(), onDecrement: vi.fn(),
+      onEdit: vi.fn(), onRemove: vi.fn(), onEditorOpen: vi.fn(),
+    };
+    render(<ItemRow item={{ ...item, note: 'Безлактозное' }} {...handlers} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить заметку: молоко' }));
+    expect(handlers.onToggleBought).not.toHaveBeenCalled();
+    expect(handlers.onEditorOpen).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: /Заметка/ }));
   });
 
   it('still checks off on a plain tap', () => {

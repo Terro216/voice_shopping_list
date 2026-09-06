@@ -47,6 +47,17 @@ describe('offlineQueue', () => {
     expect(queuedMutationCount()).toBe(0);
   });
 
+  it('preserves measured item payloads and rejects a stale unit delta on replay', async () => {
+    const body = { id: 'measured', name: 'молоко', list: 'ann', count: 1.5, unit: 'l', note: 'Безлактозное' };
+    enqueueMutation({ url: '/api/items', method: 'POST', body });
+    enqueueMutation({ url: '/api/items/measured/count', method: 'PATCH', body: { list: 'ann', delta: 0.1, expectedUnit: 'l' } });
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200)).mockResolvedValueOnce(jsonResponse(409));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await syncOfflineQueue()).toEqual({ sent: 1, rejected: 1, remaining: 0 });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(body);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ delta: 0.1, expectedUnit: 'l' });
+  });
+
   it('keeps a rate-limited mutation queued for the next attempt', async () => {
     enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '1' } });
     enqueueMutation({ url: '/api/items/1/count', method: 'PATCH', body: { delta: 1 } });

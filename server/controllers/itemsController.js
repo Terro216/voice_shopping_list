@@ -6,7 +6,9 @@ import {
   normalizeItemName,
   normalizeItemNote,
   historyKey,
-  MAX_COUNT,
+  isValidUnit,
+  quantityLimit,
+  roundQuantity,
   MAX_ORDER_IDS,
 } from "../validation.js";
 
@@ -27,7 +29,7 @@ const toItemJson = (row) => ({ ...row, bought: Boolean(row.bought) });
 // Active items follow the manual order (`position`, which dictation appends to
 // and dragging rewrites); bought ones surface most-recently-checked first, so
 // "what did I just tick off" is always at the top of that group.
-const ITEM_COLUMNS = "id, name, note, count, list_id, bought, bought_at, position";
+const ITEM_COLUMNS = "id, name, note, count, unit, list_id, bought, bought_at, position";
 const ITEM_ORDER =
   "ORDER BY bought, CASE WHEN bought = 1 THEN -COALESCE(bought_at, 0) ELSE COALESCE(position, rowid) END, rowid";
 
@@ -93,12 +95,17 @@ const recordHistory = (list, name) => {
   }
 };
 
-export const getItems = (req, res) => {
-  sweepTrash();
+// Shared by member and guest reads. This helper never sweeps trash or writes.
+export const readListItems = (list) => {
   const rows = db
     .prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE list_id = ? AND ${LIVE} ${ITEM_ORDER}`)
-    .all(req.list);
-  res.json(rows.map(toItemJson));
+    .all(list);
+  return rows.map(toItemJson);
+};
+
+export const getItems = (req, res) => {
+  sweepTrash();
+  res.json(readListItems(req.list));
 };
 
 /** The "deleted" drawer: most recently removed first. */
@@ -133,6 +140,7 @@ export const getSuggestions = (req, res) => {
 
 export const addItem = (req, res) => {
   const { id, count, bought } = req.body;
+  const unit = req.body.unit ?? null;
   const name = normalizeItemName(req.body.name);
   // Undoing a delete re-posts the item as it was, notes included.
   const note = req.body.note === undefined ? null : normalizeItemNote(req.body.note);
@@ -140,7 +148,7 @@ export const addItem = (req, res) => {
   if (!isValidItemId(id) || !name || note === false) {
     return res.status(400).json({ error: "Invalid item fields" });
   }
-  if (count !== undefined && !isValidCount(count)) {
+  if (!isValidCount(count === undefined ? 1 : count, unit)) {
     return res.status(400).json({ error: "Invalid count" });
   }
   if (bought !== undefined && typeof bought !== "boolean") {
@@ -158,13 +166,14 @@ export const addItem = (req, res) => {
     if (existing) {
       if (existing.deleted_at === null) return false;
       db.prepare(
-        `UPDATE items SET name = ?, note = ?, count = ?, bought = ?, bought_at = ?,
+        `UPDATE items SET name = ?, note = ?, count = ?, unit = ?, bought = ?, bought_at = ?,
                           deleted_at = NULL, position = ?
           WHERE id = ? AND list_id = ?`,
       ).run(
         name,
         note,
         count ?? 1,
+        unit,
         bought ? 1 : 0,
         bought ? Date.now() : null,
         nextPosition(req.list),
@@ -175,13 +184,14 @@ export const addItem = (req, res) => {
     }
 
     db.prepare(
-      `INSERT INTO items (id, name, note, count, list_id, bought, bought_at, position)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO items (id, name, note, count, unit, list_id, bought, bought_at, position)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       name,
       note,
       count ?? 1,
+      unit,
       req.list,
       bought ? 1 : 0,
       bought ? Date.now() : null,
@@ -196,31 +206,35 @@ export const addItem = (req, res) => {
   }
 
   recordHistory(req.list, name);
-  notifyList(req, `+ ${name}${(count ?? 1) > 1 ? ` ×${count}` : ""}`);
+  notifyList(req, `+ ${name}${unit ? ` ${count ?? 1} ${unit}` : (count ?? 1) > 1 ? ` ×${count}` : ""}`);
   res.status(201).json({ success: true });
 };
 
 // Single mutation endpoint for counts: positive delta increments (clamped to
-// MAX_COUNT), negative decrements; a count dropping to zero sends the row to
+// the unit's limit), negative decrements; a count dropping to zero sends the row to
 // the deleted drawer, exactly like an explicit delete.
 export const changeItemCount = (req, res) => {
   const { id } = req.params;
-  const { delta } = req.body;
+  const { delta, expectedUnit } = req.body;
 
   if (!isValidItemId(id)) {
     return res.status(400).json({ error: "Invalid fields" });
   }
-  if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > MAX_COUNT) {
-    return res.status(400).json({ error: "delta must be a non-zero integer" });
+  if (typeof delta !== "number" || !Number.isFinite(delta) || delta === 0 ||
+      Math.abs(delta) > 999999 || delta !== roundQuantity(delta) ||
+      (expectedUnit !== undefined && !isValidUnit(expectedUnit))) {
+    return res.status(400).json({ error: "Invalid quantity change" });
   }
 
   const apply = db.transaction(() => {
     const item = db
-      .prepare(`SELECT name, count FROM items WHERE id = ? AND list_id = ? AND ${LIVE}`)
+      .prepare(`SELECT name, count, unit FROM items WHERE id = ? AND list_id = ? AND ${LIVE}`)
       .get(id, req.list);
     if (!item) return null;
 
-    const next = Math.min(MAX_COUNT, item.count + delta);
+    if (expectedUnit !== undefined && expectedUnit !== item.unit) return { error: 409 };
+    if (!isValidCount(Math.abs(delta), item.unit)) return { error: 400 };
+    const next = Math.min(quantityLimit(item.unit), roundQuantity(item.count + delta));
     if (next <= 0) {
       db.prepare("UPDATE items SET deleted_at = ? WHERE id = ? AND list_id = ?").run(
         Date.now(),
@@ -230,7 +244,7 @@ export const changeItemCount = (req, res) => {
       return { label: `− ${item.name}` };
     }
     db.prepare("UPDATE items SET count = ? WHERE id = ? AND list_id = ?").run(next, id, req.list);
-    return { label: `${item.name} ×${next}` };
+    return { label: `${item.name} ${item.unit ? `${next} ${item.unit}` : `×${next}`}` };
   });
 
   const result = apply();
@@ -238,6 +252,7 @@ export const changeItemCount = (req, res) => {
     return res.status(404).json({ error: "Item not found" });
   }
 
+  if (result.error) return res.status(result.error).json({ error: "Quantity or unit changed; refresh the item" });
   notifyList(req, result.label);
   res.json({ success: true });
 };
@@ -252,11 +267,13 @@ export const updateItem = (req, res) => {
   const { id } = req.params;
   const hasName = req.body.name !== undefined;
   const hasNote = req.body.note !== undefined;
+  const hasCount = req.body.count !== undefined;
+  const hasUnit = req.body.unit !== undefined;
 
   const name = hasName ? normalizeItemName(req.body.name) : null;
   const note = hasNote ? normalizeItemNote(req.body.note) : null;
 
-  if (!isValidItemId(id) || (!hasName && !hasNote)) {
+  if (!isValidItemId(id) || (!hasName && !hasNote && !hasCount && !hasUnit)) {
     return res.status(400).json({ error: "Invalid fields" });
   }
   if ((hasName && !name) || (hasNote && note === false)) {
@@ -274,12 +291,17 @@ export const updateItem = (req, res) => {
     values.push(note);
   }
 
-  const { changes } = db
-    .prepare(
-      `UPDATE items SET ${assignments.join(", ")} WHERE id = ? AND list_id = ? AND ${LIVE}`,
-    )
-    .run(...values, id, req.list);
-  if (changes === 0) return res.status(404).json({ error: "Item not found" });
+  const result = db.transaction(() => {
+    const item = db.prepare(`SELECT count, unit FROM items WHERE id = ? AND list_id = ? AND ${LIVE}`).get(id, req.list);
+    if (!item) return 404;
+    if ((hasCount || hasUnit) && !isValidCount(hasCount ? req.body.count : item.count, hasUnit ? req.body.unit : item.unit)) return 400;
+    if (hasCount) { assignments.push("count = ?"); values.push(req.body.count); }
+    if (hasUnit) { assignments.push("unit = ?"); values.push(req.body.unit); }
+    db.prepare(`UPDATE items SET ${assignments.join(", ")} WHERE id = ? AND list_id = ? AND ${LIVE}`)
+      .run(...values, id, req.list);
+    return 200;
+  })();
+  if (result !== 200) return res.status(result).json({ error: result === 404 ? "Item not found" : "Invalid quantity or unit" });
 
   if (hasName) recordHistory(req.list, name);
 

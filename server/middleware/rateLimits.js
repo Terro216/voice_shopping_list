@@ -22,6 +22,10 @@ const QUARTER_HOUR = 15 * 60 * 1000;
 // generous budget instead of competing with writes.
 export const readLimiter = limiter(QUARTER_HOUR, 3000, perUser);
 
+// Guests poll a shared list without an account; keep their budget per IP and
+// independent of sign-in attempts and authenticated reads.
+export const guestReadLimiter = limiter(QUARTER_HOUR, 300);
+
 export const writeLimiter = limiter(QUARTER_HOUR, 1000, perUser);
 
 // Unauthenticated and brute-forceable, so this one stays per-IP and strict.
