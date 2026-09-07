@@ -14,6 +14,16 @@ export type SpeechCommand =
   | { type: 'clearBought' }
   | { type: 'undo' };
 
+export type Correction =
+  | { kind: 'quantity'; count: number; unit?: Unit }
+  | { kind: 'name'; name: string }
+  | { kind: 'qualifier'; value: string };
+
+export type ConversationCommand = SpeechCommand
+  | { type: 'correct'; query: string | null; change: Correction }
+  | { type: 'move'; query: string | null; destination: string }
+  | { type: 'unrecognized' };
+
 // Filler phrases stripped before single-word triggers so that e.g. "в список"
 // disappears as a whole instead of leaving "список" behind.
 const TRIGGER_PHRASES = [
@@ -61,7 +71,7 @@ const NUMBER_WORDS: Record<string, number> = {
   сто: 100, двести: 200, триста: 300, четыреста: 400, пятьсот: 500,
   шестьсот: 600, семьсот: 700, восемьсот: 800, девятьсот: 900,
   тысяча: 1000, полтора: 1.5, полторы: 1.5, половина: 0.5, пол: 0.5,
-  one: 1,
+  zero: 0, one: 1,
   two: 2, couple: 2,
   three: 3,
   four: 4,
@@ -89,7 +99,7 @@ const unitOf = (token: string | undefined): Unit | undefined =>
 
 type QuantityToken = { count: number; unit?: Unit; size: number };
 
-const readQuantity = (tokens: string[], index: number): QuantityToken | null => {
+const readQuantity = (tokens: string[], index: number, allowBare = false): QuantityToken | null => {
   const first = tokens[index];
   if (['полкило', 'полкилограмма', 'полкилограммов'].includes(first)) return { count: 0.5, unit: 'kg', size: 1 };
   if (['поллитра', 'пол-литра'].includes(first)) return { count: 0.5, unit: 'l', size: 1 };
@@ -119,7 +129,7 @@ const readQuantity = (tokens: string[], index: number): QuantityToken | null => 
   if (count === 0.5 && ['a', 'an'].includes(tokens[index + size])) size++;
   const unit = unitOf(tokens[index + size]);
   if (unit) return { count, unit, size: size + (tokens[index + size + 1] === 'of' ? 2 : 1) };
-  if (!Number.isInteger(count) || count < 1 || count > MAX_SPOKEN_COUNT) return null;
+  if (!allowBare && (!Number.isInteger(count) || count < 1 || count > MAX_SPOKEN_COUNT)) return null;
   return { count, size };
 };
 
@@ -232,4 +242,74 @@ export const parseSpeechCommand = (text: string): SpeechCommand => {
   if (remove) return { type: 'remove', queries: toQueries(remove[2]) };
 
   return { type: 'add', items: parseSpeechText(text) };
+};
+
+const cleanCommand = (text: string) => text.toLowerCase().trim().replace(/\s+/g, ' ')
+  .replace(/(\d),(\d)/g, '$1.$2')
+  .replace(/(\d)(?=(?:кг|гр|г|мл|л|kg|ml|g|l)(?:\s|$))/gu, '$1 ')
+  .replace(/[.!?…]+$/u, '').trim();
+
+/** Unlike item names, correction quantities may be bare fractions or >20. */
+const correctionQuantity = (text: string): Extract<Correction, { kind: 'quantity' }> | null => {
+  const tokens = text.split(/\s+/);
+  const quantity = readQuantity(tokens, 0, true);
+  if (quantity?.size === tokens.length) {
+    return { kind: 'quantity', count: quantity.count, ...(quantity.unit ? { unit: quantity.unit } : {}) };
+  }
+  if (tokens.length === 1 && (/^-?\d+(?:\.\d+)?$/.test(text) || NUMBER_WORDS[text] !== undefined)) {
+    return { kind: 'quantity', count: NUMBER_WORDS[text] ?? Number(text) };
+  }
+  return null;
+};
+
+const targetQuery = (text: string): string | null =>
+  /^(его|её|ее|их|это|этот|эту|последний|последнее|последнюю|it|that|them)$/u.test(text.trim())
+    ? null : text.trim();
+
+const parseConversationCommand = (text: string): ConversationCommand => {
+  // A note owns the rest of its phrase, even when it contains correction verbs.
+  const cleaned = cleanCommand(splitNote(text).body);
+  const move = cleaned.match(/^(?:перенеси|перемести|move)\s+(.+?)\s+(?:в\s+(?:список\s+)?|to\s+(?:(?:the\s+)?list\s+)?)(.+)$/u);
+  if (move) return { type: 'move', query: targetQuery(move[1]), destination: move[2].replace(/^[«"“]|[»"”]$/gu, '').trim() };
+
+  const count = cleaned.match(/^(?:измени|поменяй|установи)\s+количество\s+(.+?)\s+на\s+(.+)$/u);
+  if (count) {
+    const change = correctionQuantity(count[2]);
+    return change ? { type: 'correct', query: targetQuery(count[1]), change } : { type: 'unrecognized' };
+  }
+  const rename = cleaned.match(/^(?:замени|переименуй|назови|rename|replace)\s+(.+?)\s+(?:на|в|to|with)\s+(.+)$/u);
+  if (rename) return { type: 'correct', query: targetQuery(rename[1]), change: { kind: 'name', name: rename[2] } };
+
+  const make = cleaned.match(/^(?:сделай|make)\s+(.+?)\s+(.+)$/u);
+  if (make) {
+    const quantity = correctionQuantity(make[2]);
+    if (quantity) return { type: 'correct', query: targetQuery(make[1]), change: quantity };
+    if (targetQuery(make[1]) === null) return { type: 'correct', query: null, change: { kind: 'qualifier', value: make[2] } };
+  }
+  const correction = cleaned.match(/^(?:нет|точнее|no|actually)[,\s]+(.+)$/u)
+    ?? cleaned.match(/^не\s+.+?\s+а\s+(.+)$/u);
+  if (correction) {
+    const value = correction[1].replace(/^не\s+.+?\s+а\s+/u, '').trim();
+    const change = correctionQuantity(value);
+    // A numeric-looking failed correction must never rename milk to "3 foo".
+    if (change) return { type: 'correct', query: null, change };
+    if (/^(?:-?\d|не\s)/u.test(value) || readQuantity(value.split(/\s+/), 0)) return { type: 'unrecognized' };
+    return { type: 'correct', query: null, change: { kind: 'name', name: value } };
+  }
+  // Failed command grammar is reported instead of adding a product named
+  // "перенеси...", "нет..." or "сделай...".
+  if (/^(?:нет|точнее|не|сделай|измени|поменяй|установи|замени|переименуй|назови|перенеси|перемести|no|actually|make|rename|replace|move)(?=\s|,|$)/u.test(cleaned)) {
+    return { type: 'unrecognized' };
+  }
+  return parseSpeechCommand(text);
+};
+
+/** Corrections can follow an add in the same breath or in the next utterance. */
+export const parseSpeechUtterance = (text: string): ConversationCommand[] => {
+  const note = NOTE_MARKER.exec(text);
+  const boundary = note?.index ?? text.length;
+  const body = text.slice(0, boundary);
+  const parts = body.split(/(?:\s*[,;.!?…—–]+\s*|\s+)(?=(?:нет|точнее|сделай|замени|переименуй|перенеси|перемести|измени|no|actually|make|rename|replace|move)(?=[,\s]))/iu);
+  parts[parts.length - 1] += text.slice(boundary);
+  return parts.filter((part) => part.trim()).map(parseConversationCommand);
 };

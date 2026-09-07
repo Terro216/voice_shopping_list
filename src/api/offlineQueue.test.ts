@@ -47,6 +47,19 @@ describe('offlineQueue', () => {
     expect(queuedMutationCount()).toBe(0);
   });
 
+  it('keeps a correction appended while its preceding add is being replayed', async () => {
+    enqueueMutation({ url: '/api/items', method: 'POST', body: { id: 'milk' } });
+    let release!: (response: Response) => void;
+    const first = new Promise<Response>((resolve) => { release = resolve; });
+    const fetchMock = vi.fn().mockReturnValueOnce(first).mockResolvedValue(jsonResponse(200));
+    vi.stubGlobal('fetch', fetchMock);
+    const syncing = syncOfflineQueue();
+    enqueueMutation({ url: '/api/items/milk', method: 'PATCH', body: { count: 3 } });
+    release(jsonResponse(200));
+    expect(await syncing).toEqual({ sent: 2, rejected: 0, remaining: 0 });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/items', '/api/items/milk']);
+  });
+
   it('preserves measured item payloads and rejects a stale unit delta on replay', async () => {
     const body = { id: 'measured', name: 'молоко', list: 'ann', count: 1.5, unit: 'l', note: 'Безлактозное' };
     enqueueMutation({ url: '/api/items', method: 'POST', body });

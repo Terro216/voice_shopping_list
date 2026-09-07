@@ -15,6 +15,7 @@ export type UndoAction =
   | { kind: 'changeCount'; id: string; delta: number; unit?: Unit | null }
   | { kind: 'setBought'; id: string; bought: boolean }
   | { kind: 'editItem'; id: string; edit: ItemEdit }
+  | { kind: 'moveItem'; item: Item; from: string; to: string }
   | { kind: 'reorder'; ids: string[] };
 
 export type UndoEntry = {

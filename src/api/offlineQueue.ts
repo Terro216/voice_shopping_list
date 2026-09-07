@@ -1,4 +1,6 @@
-import { adoptRenewedToken, authHeaders, notifyAuthExpired, notifyRateLimited } from './client';
+import { adoptRenewedToken, authHeaders, notifyAuthExpired, notifyRateLimited, request } from './client';
+import { writeSnapshot } from './listCache';
+import type { Item } from './items';
 
 export type QueuedMutation = {
   url: string;
@@ -72,6 +74,7 @@ export const syncOfflineQueue = async (): Promise<SyncResult> => {
     let queue = readQueue();
     let sent = 0;
     let rejected = 0;
+    const movedLists = new Set<string>();
 
     while (queue.length > 0) {
       const next = queue[0];
@@ -105,8 +108,28 @@ export const syncOfflineQueue = async (): Promise<SyncResult> => {
       if (res.ok) sent++;
       else rejected++;
 
-      queue = queue.slice(1);
+      if (next.url.endsWith('/move') && next.body && typeof next.body === 'object') {
+        const body = next.body as { list?: unknown; destination?: unknown };
+        for (const list of [body.list, body.destination]) {
+          if (typeof list === 'string') movedLists.add(list);
+        }
+      }
+
+      // A correction can be queued while the preceding add is in flight.
+      // Re-read so completing that add never discards the newly queued tail.
+      queue = readQueue().slice(1);
       writeQueue(queue);
+    }
+
+    // A move updates two offline snapshots. Refresh both once replay settles,
+    // including rejected moves, so the unseen list cannot keep a phantom row.
+    if (queue.length === 0) {
+      await Promise.all([...movedLists].map(async (list) => {
+        try {
+          const items = await request<Item[]>(`/api/items?list=${encodeURIComponent(list)}`);
+          if (Array.isArray(items) && queuedMutationCount() === 0) writeSnapshot(list, items);
+        } catch { /* Keep the last snapshot if connectivity disappeared again. */ }
+      }));
     }
 
     if (sent > 0 || rejected > 0) announceQueueChange();

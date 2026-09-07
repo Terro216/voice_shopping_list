@@ -48,6 +48,20 @@ Express 5 + SQLite (better-sqlite3) + Socket.IO on the backend.
   "очисти купленное" clears the cart, "отмена" undoes the last action. Fuzzy
   matching handles inflected forms ("молока" → «молоко»). When nothing could be
   parsed the app says what it heard and offers to add it verbatim.
+- **Conversational corrections**: "добавь два молока… нет, три" sets the final
+  quantity to three. A following utterance can say "нет, три" or "сделай его
+  безлактозным". Context is the last row added by voice (including a merged
+  row), lasts two minutes, and is discarded on list/language changes, reload,
+  other voice commands or a changed item. Explicit "замени молоко на овсяное
+  молоко" keeps quantity, unit and note. Adjective-only Russian corrections use
+  a small vocabulary of common dairy types; other names should be spoken in
+  full. Ambiguous items or destination lists open a choice and pause dictation.
+  "Перенеси кофе в список для дачи" moves the existing row to a list named
+  "Дача" atomically, without merging it into another row. Both lists require
+  editing access. Undo in the source list returns the row; move undo also
+  survives reload. Corrections and moves are queued offline; stale corrections
+  are rejected if the row changed before replay. Speech recognition itself
+  still depends on the browser and may require a connection.
 - **Undo everywhere**: an ↩️ button in the header, plus an "Undo" action on the
   toast that follows every delete or "clear bought". Entries are stored as data
   rather than closures, so the stack survives a reload — closing the app in a

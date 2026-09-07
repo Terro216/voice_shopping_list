@@ -519,6 +519,45 @@ try {
   r = await api(`/api/items?list=${encodeURIComponent(dacha.id)}`, { token });
   check('the owner still has their list', r.status === 200, JSON.stringify(r));
 
+  // ---- contextual edits and atomic transfers ----
+  const correctionItem = { id: 'voice-milk', name: 'молоко', count: 2, unit: 'l', note: 'Красная пачка', bought: false };
+  await api('/api/items', { method: 'POST', token, body: { ...correctionItem, list: user } });
+  const expected = { name: correctionItem.name, count: 2, unit: 'l', note: correctionItem.note, bought: false };
+  const correction = { list: user, count: 3, expected };
+  r = await api('/api/items/voice-milk', { method: 'PATCH', token, body: correction });
+  check('contextual edit accepts the expected row', r.status === 200, JSON.stringify(r));
+  r = await api('/api/items/voice-milk', { method: 'PATCH', token, body: correction });
+  check('replaying a contextual edit is idempotent', r.status === 200, JSON.stringify(r));
+  r = await api('/api/items/voice-milk', { method: 'PATCH', token, body: { list: user, name: 'чужое исправление', expected } });
+  check('stale correction is rejected → 409', r.status === 409, JSON.stringify(r));
+  const transfer = { list: user, destination: dacha.id, expected: { ...expected, count: 3 } };
+  r = await api('/api/items/voice-milk/move', { method: 'POST', body: transfer });
+  check('a move requires authentication → 401', r.status === 401);
+  r = await api('/api/items/voice-milk/move', { method: 'POST', token: otherToken, body: transfer });
+  check('a move requires source access → 403', r.status === 403);
+  r = await api('/api/items/voice-milk/move', { method: 'POST', token, body: { ...transfer, destination: other } });
+  check('a move requires destination access → 403', r.status === 403);
+  r = await api('/api/items/voice-milk/move', { method: 'POST', token, body: { ...transfer, destination: user } });
+  check('a move to the same list is rejected → 400', r.status === 400);
+  r = await api('/api/items/voice-milk/move', { method: 'POST', token, body: { ...transfer, expected } });
+  check('a stale move is rejected → 409', r.status === 409);
+  r = await api(`/api/items?list=${user}`, { token });
+  check('failed moves leave the source intact', r.data?.some(item => item.id === correctionItem.id && item.count === 3 && item.name === 'молоко'));
+  r = await api('/api/items/voice-milk/move', { method: 'POST', token, body: transfer });
+  check('a move preserves id, quantity, unit and note', r.status === 200 && r.data?.id === correctionItem.id && r.data?.list_id === dacha.id && r.data?.count === 3 && r.data?.unit === 'l' && r.data?.note === expected.note, JSON.stringify(r));
+  r = await api('/api/items/voice-milk/move', { method: 'POST', token, body: transfer });
+  check('replaying a move succeeds without duplicating', r.status === 200);
+  r = await api(`/api/items?list=${user}`, { token });
+  check('the moved item is absent from the source', !r.data?.some(item => item.id === correctionItem.id));
+  r = await api(`/api/items?list=${dacha.id}`, { token });
+  check('the destination has exactly one copy', r.data?.filter(item => item.id === correctionItem.id).length === 1);
+  await api('/api/items/voice-milk', { method: 'PATCH', token, body: { list: dacha.id, note: 'Изменено в другом списке' } });
+  r = await api('/api/items/voice-milk/move', { method: 'POST', token, body: { list: dacha.id, destination: user } });
+  check('undoing a move preserves later destination edits', r.status === 200 && r.data?.list_id === user && r.data?.note === 'Изменено в другом списке');
+  await api(`/api/items/voice-milk?list=${user}`, { method: 'DELETE', token });
+  r = await api('/api/items/voice-milk/move', { method: 'POST', token, body: transfer });
+  check('a deleted row cannot be moved → 404', r.status === 404);
+
   r = await api(`/api/lists/${encodeURIComponent(dacha.id)}`, { method: 'DELETE', token });
   check('the owner deletes the list → 200', r.data?.deleted === true, JSON.stringify(r));
   r = await api(`/api/items?list=${encodeURIComponent(dacha.id)}`, { token });

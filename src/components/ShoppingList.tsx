@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useShoppingList } from '../hooks/useShoppingList';
+import { useConversation } from '../hooks/useConversation';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import { useSuggestions } from '../hooks/useSuggestions';
 import { useWakeLock } from '../hooks/useWakeLock';
@@ -15,7 +16,8 @@ import { ImportSheet } from './ImportSheet';
 import { ListsSheet } from './ListsSheet';
 import { HelpSheet } from './HelpSheet';
 import { DeletedDrawer } from './DeletedDrawer';
-import { parseSpeechCommand, ParsedItem } from '../utils/speechParser';
+import { Sheet } from './Sheet';
+import { type SpeechCommand, ParsedItem } from '../utils/speechParser';
 import { takeMicIntent, takeSharedText } from '../launchIntent';
 import { findBestMatch } from '../utils/matchItem';
 import { cue, haptic } from '../utils/feedback';
@@ -70,6 +72,8 @@ export const ShoppingList = ({
     addItem,
     removeItem,
     editItem,
+    moveItem,
+    getItems,
     changeCount,
     setBought,
     toggleBought,
@@ -95,18 +99,23 @@ export const ShoppingList = ({
 
   const addAndRefresh = useCallback(
     async (name: string, count = 1, details: Pick<Item, 'unit' | 'note'> = {}) => {
-      await addItem(name, count, details);
+      const item = await addItem(name, count, details);
       refreshFrequent();
+      return item;
     },
     [addItem, refreshFrequent],
   );
 
   const performUndo = useCallback(async () => {
-    const label = await undo();
-    if (label) {
-      toast(t('undone', { label }), { icon: '↩️', id: ITEM_TOAST });
-    } else {
-      toast(t('nothingToUndo'), { id: ITEM_TOAST });
+    try {
+      const label = await undo();
+      if (label) {
+        toast(t('undone', { label }), { icon: '↩️', id: ITEM_TOAST });
+      } else {
+        toast(t('nothingToUndo'), { id: ITEM_TOAST });
+      }
+    } catch {
+      toast.error(t('voiceChangeFailed'), { id: ITEM_TOAST });
     }
   }, [undo, t]);
 
@@ -134,10 +143,8 @@ export const ShoppingList = ({
     [performUndo, t],
   );
 
-  const handleSpeech = useCallback(
-    async (text: string) => {
-      const command = parseSpeechCommand(text);
-
+  const executeBasic = useCallback(
+    async (command: SpeechCommand, text: string) => {
       switch (command.type) {
         case 'add': {
           if (command.items.length === 0) {
@@ -174,6 +181,13 @@ export const ShoppingList = ({
             toast.error(t('noteTooLong'), { id: SPEECH_TOAST });
             return;
           }
+          // Sequential: a correction following this add must know the actual
+          // row id, including when dictation merged into an existing row.
+          let lastItem: Item | undefined;
+          for (const parsed of command.items) {
+            lastItem = await addAndRefresh(parsed.name, parsed.count, parsed);
+            if (!lastItem) return;
+          }
           cue('added');
           toast.success(
             t('recognized', {
@@ -183,19 +197,14 @@ export const ShoppingList = ({
             }),
             { id: SPEECH_TOAST },
           );
-          // Sequential: two mentions of the same item in one utterance must see
-          // each other, otherwise they race into two rows instead of one ×2.
-          for (const parsed of command.items) {
-            await addAndRefresh(parsed.name, parsed.count, parsed);
-          }
-          break;
+          return lastItem;
         }
         case 'check':
         case 'remove': {
           const found: string[] = [];
           const missed: string[] = [];
           for (const query of command.queries) {
-            const item = findBestMatch(items, query);
+            const item = findBestMatch(getItems(), query);
             if (!item) {
               missed.push(query);
               continue;
@@ -232,8 +241,12 @@ export const ShoppingList = ({
           break;
       }
     },
-    [items, addAndRefresh, setBought, removeItem, clearBought, performUndo, toastWithUndo, t, lang],
+    [getItems, addAndRefresh, setBought, removeItem, clearBought, performUndo, toastWithUndo, t, lang],
   );
+
+  const { handleSpeech, choice, choose, contextName } = useConversation({
+    list, lang, lists, getItems, editItem, moveItem, executeBasic,
+  });
 
   const onSpeechError = useCallback(
     (error: string) => {
@@ -248,6 +261,10 @@ export const ShoppingList = ({
 
   // Keep the phone awake while dictating in the store.
   useWakeLock(isListening);
+
+  useEffect(() => {
+    if (choice) stopListening(true);
+  }, [choice, stopListening]);
 
   const openImport = (text = '') => {
     setImportText(text);
@@ -453,6 +470,8 @@ export const ShoppingList = ({
         flushNow={flushNow}
       />
 
+      {contextName && <p className={styles.voiceContext} role="status">{t('voiceContext', { name: contextName })}</p>}
+
       <form className={styles.form} onSubmit={handleManualAdd}>
         <input
           value={newItemName}
@@ -527,6 +546,17 @@ export const ShoppingList = ({
         />
       </div>
 
+      {choice && (
+        <Sheet title={choice.title} onClose={() => choose(null)}>
+          <p className={styles.sheetSubtitle}>{t('voiceChoiceHint')}</p>
+          <div className={styles.voiceChoices}>
+            {choice.options.map((option) => (
+              <button type="button" key={option.id} onClick={() => choose(option.id)}>{option.label}</button>
+            ))}
+          </div>
+          <div className={styles.sheetActions}><button type="button" onClick={() => choose(null)}>{t('cancel')}</button></div>
+        </Sheet>
+      )}
       {sheet === 'share' && (
         <ShareSheet
           list={list}

@@ -16,6 +16,9 @@ import {
   purgeDeletedItems,
   reorderItems,
   generateItemId,
+  moveItem as moveItemRequest,
+  itemExpectation,
+  type ItemExpectation,
 } from '../api/items';
 import { readSnapshot, writeSnapshot } from '../api/listCache';
 import {
@@ -32,6 +35,7 @@ import {
 } from '../api/offlineQueue';
 import { ApiError, CLIENT_ID, getToken, notifyAuthExpired } from '../api/client';
 import { sameName } from '../utils/wordForms';
+import { itemFingerprint } from '../utils/conversation';
 import { useT } from '../i18n';
 
 import { convertQuantity, isValidQuantity, quantityLimit, roundQuantity, type Unit } from '../../shared/quantity.js';
@@ -126,8 +130,10 @@ export const useShoppingList = (list: string, viewer: string) => {
 
   const loadItems = useCallback(
     async (notifyOnChange = false) => {
+      if (queuedMutationCount() > 0) return;
       try {
         const data = await fetchItems(list);
+        if (queuedMutationCount() > 0) return;
         setAccessDenied(false);
         if (notifyOnChange && !sameList(itemsRef.current, data)) {
           toast(tRef.current('listUpdated'), { icon: '🔄', id: 'remote-update' });
@@ -198,7 +204,10 @@ export const useShoppingList = (list: string, viewer: string) => {
       setIsOffline(true);
       toast(tRef.current('offlineMode'), { icon: '📴', id: 'connectivity' });
     };
-    const handleQueueChange = () => setPendingCount(queuedMutationCount());
+    const handleQueueChange = () => {
+      setPendingCount(queuedMutationCount());
+      if (navigator.onLine && queuedMutationCount() > 0) void runSync();
+    };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -221,9 +230,11 @@ export const useShoppingList = (list: string, viewer: string) => {
       applyItems((prev) => [...prev.filter((entry) => entry.id !== item.id), item]);
       try {
         await createItem(item);
+        return true;
       } catch {
         toast.error(tRef.current('addFailed', { name: item.name }));
         loadItems();
+        return false;
       }
     },
     [applyItems, loadItems],
@@ -263,8 +274,10 @@ export const useShoppingList = (list: string, viewer: string) => {
       if (before && before.count + delta <= 0) noteDeleted(before);
       try {
         await changeItemCount(id, list, delta, before.unit ?? null);
+        return true;
       } catch {
         loadItems();
+        return false;
       }
     },
     [list, applyItems, loadItems, noteDeleted],
@@ -279,20 +292,26 @@ export const useShoppingList = (list: string, viewer: string) => {
       );
       try {
         await setItemBought(id, list, bought);
+        return true;
       } catch {
         loadItems();
+        return false;
       }
     },
     [list, applyItems, loadItems],
   );
 
   const applyEdit = useCallback(
-    async (id: string, edit: ItemEdit) => {
+    async (id: string, edit: ItemEdit, expected?: ItemExpectation) => {
+      const previous = itemsRef.current.find((item) => item.id === id);
       applyItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...edit } : item)));
       try {
-        await updateItemRequest(id, list, edit);
+        await updateItemRequest(id, list, edit, expected);
+        return true;
       } catch {
-        loadItems();
+        if (previous) applyItems((prev) => prev.map((item) => item.id === id ? previous : item));
+        await loadItems();
+        return false;
       }
     },
     [list, applyItems, loadItems],
@@ -338,7 +357,7 @@ export const useShoppingList = (list: string, viewer: string) => {
       } else {
         pushUndo(item.name, { kind: 'changeCount', id, delta: -appliedDelta, unit: item.unit ?? null });
       }
-      await applyCount(id, appliedDelta);
+      return applyCount(id, appliedDelta);
     },
     [applyCount, pushUndo],
   );
@@ -366,10 +385,10 @@ export const useShoppingList = (list: string, viewer: string) => {
         if (existing.bought) {
           // Re-adding something already checked off puts it back on the list.
           pushUndo(existing.name, { kind: 'setBought', id: existing.id, bought: true });
-          await applyBought(existing.id, false);
-          return;
+          return await applyBought(existing.id, false) ? itemsRef.current.find((item) => item.id === existing.id) : undefined;
         }
-        return changeCount(existing.id, convertQuantity(count, unit, existing.unit)!);
+        return await changeCount(existing.id, convertQuantity(count, unit, existing.unit)!)
+          ? itemsRef.current.find((item) => item.id === existing.id) : undefined;
       }
 
       const newItem: Item = {
@@ -383,7 +402,7 @@ export const useShoppingList = (list: string, viewer: string) => {
         bought_at: null,
       };
       pushUndo(trimmed, { kind: 'removeItem', id: newItem.id });
-      await applyAdd(newItem);
+      return await applyAdd(newItem) ? itemsRef.current.find((item) => item.id === newItem.id) : undefined;
     },
     [list, changeCount, applyAdd, applyBought, pushUndo],
   );
@@ -399,9 +418,9 @@ export const useShoppingList = (list: string, viewer: string) => {
   );
 
   const editItem = useCallback(
-    async (id: string, edit: ItemEdit) => {
+    async (id: string, edit: ItemEdit, expected?: Item) => {
       const item = itemsRef.current.find((i) => i.id === id);
-      if (!item) return;
+      if (!item || (expected && itemFingerprint(item) !== itemFingerprint(expected))) return false;
 
       const next: ItemEdit = {};
       if (edit.name !== undefined) {
@@ -419,18 +438,44 @@ export const useShoppingList = (list: string, viewer: string) => {
         if (!isValidQuantity(count, unit)) { toast.error(tRef.current('invalidQuantity')); return; }
         if (count !== item.count || unit !== (item.unit ?? null)) { next.count = count; next.unit = unit; }
       }
-      if (Object.keys(next).length === 0) return;
+      if (Object.keys(next).length === 0) return true;
 
       const previous: ItemEdit = {};
       if (next.name !== undefined) previous.name = item.name;
       if (next.note !== undefined) previous.note = item.note ?? null;
       if (next.count !== undefined || next.unit !== undefined) { previous.count = item.count; previous.unit = item.unit ?? null; }
 
+      if (!await applyEdit(id, next, expected ? itemExpectation(expected) : undefined)) return false;
       pushUndo(item.name, { kind: 'editItem', id, edit: previous });
-      await applyEdit(id, next);
+      return true;
     },
     [applyEdit, pushUndo],
   );
+
+  const applyMove = useCallback(async (item: Item, from: string, to: string, expected?: ItemExpectation) => {
+    const moved = await moveItemRequest(item.id, from, to, expected) ?? { ...item, list_id: to };
+    const source = from === list ? itemsRef.current : (readSnapshot(from)?.items ?? []);
+    const target = to === list ? itemsRef.current : (readSnapshot(to)?.items ?? []);
+    const sourceNext = source.filter((entry) => entry.id !== item.id);
+    const targetNext = [...target.filter((entry) => entry.id !== item.id), moved];
+    writeSnapshot(from, sourceNext);
+    writeSnapshot(to, targetNext);
+    applyItems(() => list === from ? sourceNext : targetNext);
+    return moved;
+  }, [list, applyItems]);
+
+  const moveItem = useCallback(async (id: string, destination: string, expected: Item) => {
+    const item = itemsRef.current.find((entry) => entry.id === id);
+    if (!item || destination === list || itemFingerprint(item) !== itemFingerprint(expected)) return false;
+    try {
+      const moved = await applyMove(item, list, destination, itemExpectation(item));
+      pushUndo(item.name, { kind: 'moveItem', item: moved, from: destination, to: list });
+      return true;
+    } catch {
+      await loadItems();
+      return false;
+    }
+  }, [list, applyMove, pushUndo, loadItems]);
 
   const setBought = useCallback(
     async (id: string, bought: boolean) => {
@@ -528,11 +573,14 @@ export const useShoppingList = (list: string, viewer: string) => {
           return applyBought(action.id, action.bought);
         case 'editItem':
           return applyEdit(action.id, action.edit);
+        case 'moveItem':
+          await applyMove(action.item, action.from, action.to);
+          return;
         case 'reorder':
           return applyOrder(action.ids);
       }
     },
-    [applyAdd, applyRemove, applyCount, applyBought, applyEdit, applyOrder],
+    [applyAdd, applyRemove, applyCount, applyBought, applyEdit, applyOrder, applyMove],
   );
 
   /**
@@ -559,7 +607,14 @@ export const useShoppingList = (list: string, viewer: string) => {
       const entry = undoStackRef.current.pop()!;
       writeUndoStack(list, undoStackRef.current);
       if (!isApplicable(entry.action)) continue;
-      await runUndoAction(entry.action);
+      try {
+        const result = await runUndoAction(entry.action);
+        if (result === false) throw new Error('Undo failed');
+      } catch (error) {
+        undoStackRef.current.push(entry);
+        writeUndoStack(list, undoStackRef.current);
+        throw error;
+      }
       return entry.label;
     }
     return null;
@@ -577,6 +632,8 @@ export const useShoppingList = (list: string, viewer: string) => {
     addItem,
     removeItem,
     editItem,
+    moveItem,
+    getItems: () => itemsRef.current,
     changeCount,
     setBought,
     toggleBought,

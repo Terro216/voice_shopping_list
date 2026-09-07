@@ -12,6 +12,7 @@ const SECTIONS: { title: TranslationKey; body: TranslationKey }[] = [
   { title: 'helpVoiceTitle', body: 'helpVoiceText' },
   { title: 'helpCountsTitle', body: 'helpCountsText' },
   { title: 'helpCommandsTitle', body: 'helpCommandsText' },
+  { title: 'helpCorrectionsTitle', body: 'helpCorrectionsText' },
   { title: 'helpGesturesTitle', body: 'helpGesturesText' },
   { title: 'helpEditTitle', body: 'helpEditText' },
   { title: 'helpListsTitle', body: 'helpListsText' },

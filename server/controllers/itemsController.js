@@ -1,7 +1,9 @@
 import db from "../db/index.js";
 import { scheduleListPush } from "../push.js";
+import { hasListAccess, getList } from "../lists.js";
 import {
   isValidItemId,
+  isValidListId,
   isValidCount,
   normalizeItemName,
   normalizeItemNote,
@@ -19,10 +21,15 @@ import {
 // Broadcasts to everyone viewing the list. The originating tab identifies
 // itself with X-Client-Id so it can ignore the echo of its own change instead
 // of refetching (and briefly flickering back to the pre-optimistic value).
-const notifyList = (req, pushLabel) => {
-  req.app.get("io").to(`list_${req.list}`).emit("list_updated", { actor: req.get("X-Client-Id") || null });
-  if (pushLabel) scheduleListPush(req.list, req.user.username, pushLabel);
+const notifyList = (req, pushLabel, list = req.list) => {
+  req.app.get("io").to(`list_${list}`).emit("list_updated", { actor: req.get("X-Client-Id") || null });
+  if (pushLabel) scheduleListPush(list, req.user.username, pushLabel);
 };
+
+const matchesExpectation = (item, expected) => expected &&
+  item.name === expected.name && (item.note ?? null) === expected.note &&
+  item.count === expected.count && (item.unit ?? null) === expected.unit &&
+  Boolean(item.bought) === expected.bought;
 
 const toItemJson = (row) => ({ ...row, bought: Boolean(row.bought) });
 
@@ -292,8 +299,17 @@ export const updateItem = (req, res) => {
   }
 
   const result = db.transaction(() => {
-    const item = db.prepare(`SELECT count, unit FROM items WHERE id = ? AND list_id = ? AND ${LIVE}`).get(id, req.list);
+    const item = db.prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE id = ? AND list_id = ? AND ${LIVE}`).get(id, req.list);
     if (!item) return 404;
+    if (req.body.expected !== undefined && !matchesExpectation(item, req.body.expected)) {
+      // A lost response may replay an already applied absolute correction.
+      const alreadyApplied = req.body.expected && matchesExpectation(item, {
+        ...req.body.expected,
+        ...(hasName ? { name } : {}), ...(hasNote ? { note } : {}),
+        ...(hasCount ? { count: req.body.count } : {}), ...(hasUnit ? { unit: req.body.unit } : {}),
+      });
+      return alreadyApplied ? 208 : 409;
+    }
     if ((hasCount || hasUnit) && !isValidCount(hasCount ? req.body.count : item.count, hasUnit ? req.body.unit : item.unit)) return 400;
     if (hasCount) { assignments.push("count = ?"); values.push(req.body.count); }
     if (hasUnit) { assignments.push("unit = ?"); values.push(req.body.unit); }
@@ -301,7 +317,8 @@ export const updateItem = (req, res) => {
       .run(...values, id, req.list);
     return 200;
   })();
-  if (result !== 200) return res.status(result).json({ error: result === 404 ? "Item not found" : "Invalid quantity or unit" });
+  if (result === 208) return res.json({ success: true });
+  if (result !== 200) return res.status(result).json({ error: result === 404 ? "Item not found" : result === 409 ? "Item changed; repeat the correction" : "Invalid quantity or unit" });
 
   if (hasName) recordHistory(req.list, name);
 
@@ -310,6 +327,35 @@ export const updateItem = (req, res) => {
     : `✎ ${db.prepare("SELECT name FROM items WHERE id = ? AND list_id = ?").get(id, req.list).name}`;
   notifyList(req, label);
   res.json({ success: true });
+};
+
+/** Move the existing row atomically, preserving its identity and all details. */
+export const moveItem = (req, res) => {
+  const { id } = req.params;
+  const { destination, expected } = req.body;
+  if (!isValidItemId(id) || !isValidListId(destination) || destination === req.list) {
+    return res.status(400).json({ error: "Invalid destination" });
+  }
+  if (!getList(destination) || !hasListAccess(req.user.username, destination)) {
+    return res.status(403).json({ error: "No access to destination list" });
+  }
+  const result = db.transaction(() => {
+    const item = db.prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE id = ? AND ${LIVE}`).get(id);
+    if (!item || (item.list_id !== req.list && item.list_id !== destination)) return { error: 404 };
+    // Replaying a request whose response was lost must not duplicate the row.
+    if (item.list_id === destination) return { item, replay: true };
+    if (expected !== undefined && !matchesExpectation(item, expected)) return { error: 409 };
+    const position = nextPosition(destination);
+    db.prepare(`UPDATE items SET list_id = ?, position = ? WHERE id = ? AND list_id = ? AND ${LIVE}`)
+      .run(destination, position, id, req.list);
+    return { item: { ...item, list_id: destination, position } };
+  })();
+  if (result.error) return res.status(result.error).json({ error: "Item missing or changed; repeat the move" });
+  if (!result.replay) {
+    notifyList(req, `→ ${result.item.name}`);
+    notifyList(req, `← ${result.item.name}`, destination);
+  }
+  res.json(toItemJson(result.item));
 };
 
 export const setItemBought = (req, res) => {

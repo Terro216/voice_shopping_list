@@ -6,6 +6,7 @@ import {
   addItem,
   changeItemCount,
   updateItem,
+  moveItem,
   setItemBought,
   reorderItems,
   clearBought,
@@ -31,6 +32,7 @@ router.delete("/deleted", writeLimiter, requireListAccess, purgeDeleted);
 router.patch("/:id/count", writeLimiter, requireListAccess, changeItemCount);
 router.patch("/:id/bought", writeLimiter, requireListAccess, setItemBought);
 router.post("/:id/restore", writeLimiter, requireListAccess, restoreItem);
+router.post("/:id/move", writeLimiter, requireListAccess, moveItem);
 router.patch("/:id", writeLimiter, requireListAccess, updateItem);
 router.delete("/:id", writeLimiter, requireListAccess, deleteItem);
 

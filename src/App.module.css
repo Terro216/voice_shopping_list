@@ -960,3 +960,21 @@
     box-shadow: 0 0 0 0 rgba(192, 43, 32, 0);
   }
 }
+.voiceContext {
+  margin: 0 0 12px;
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+
+.voiceChoices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.voiceChoices button {
+  min-height: 48px;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

@@ -1,5 +1,5 @@
 import { request, ApiError, NetworkError } from './client';
-import { enqueueMutation } from './offlineQueue';
+import { enqueueMutation, queuedMutationCount } from './offlineQueue';
 import type { Unit } from '../../shared/quantity.js';
 
 export type Item = {
@@ -27,6 +27,12 @@ export type ItemEdit = {
   unit?: Unit | null;
 };
 
+export const itemExpectation = (item: Item) => ({
+  name: item.name, note: item.note ?? null, count: item.count,
+  unit: item.unit ?? null, bought: item.bought,
+});
+export type ItemExpectation = ReturnType<typeof itemExpectation>;
+
 export type Suggestion = {
   name: string;
   uses: number;
@@ -42,13 +48,13 @@ export const generateItemId = () =>
  * dies in transit) they land in the offline queue instead of failing. An HTTP
  * error is a real answer from the server and is thrown to the caller.
  */
-const sendOrQueue = async (url: string, method: string, body?: unknown): Promise<void> => {
-  if (!navigator.onLine) {
+const sendOrQueue = async <T = void>(url: string, method: string, body?: unknown): Promise<T | undefined> => {
+  if (!navigator.onLine || queuedMutationCount() > 0) {
     enqueueMutation({ url, method, body });
     return;
   }
   try {
-    await request(url, { method, body });
+    return await request<T>(url, { method, body });
   } catch (err) {
     if (err instanceof ApiError) throw err;
     if (err instanceof NetworkError) {
@@ -77,8 +83,11 @@ export const changeItemCount = (id: string, list: string, delta: number, expecte
     list, delta, ...(expectedUnit !== undefined ? { expectedUnit } : {}),
   });
 
-export const updateItem = (id: string, list: string, edit: ItemEdit): Promise<void> =>
-  sendOrQueue(`/api/items/${encodeURIComponent(id)}`, 'PATCH', { list, ...edit });
+export const updateItem = (id: string, list: string, edit: ItemEdit, expected?: ItemExpectation): Promise<void> =>
+  sendOrQueue(`/api/items/${encodeURIComponent(id)}`, 'PATCH', { list, ...edit, ...(expected ? { expected } : {}) });
+
+export const moveItem = (id: string, list: string, destination: string, expected?: ItemExpectation) =>
+  sendOrQueue<Item>(`/api/items/${encodeURIComponent(id)}/move`, 'POST', { list, destination, ...(expected ? { expected } : {}) });
 
 export const setItemBought = (id: string, list: string, bought: boolean): Promise<void> =>
   sendOrQueue(`/api/items/${encodeURIComponent(id)}/bought`, 'PATCH', { list, bought });
