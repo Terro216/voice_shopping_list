@@ -8,6 +8,8 @@ import styles from '../App.module.css';
 
 type Props = {
   lists: ListSummary[];
+  loading?: boolean;
+  error?: boolean;
   activeList: string;
   viewer: string;
   onSelectList: (list: string) => void;
@@ -22,6 +24,8 @@ type Props = {
  */
 export const ListsSheet = ({
   lists,
+  loading,
+  error,
   activeList,
   viewer,
   onSelectList,
@@ -94,6 +98,8 @@ export const ListsSheet = ({
   return (
     <Sheet title={t('listsTitle')} onClose={onClose}>
       <p className={styles.sheetHint}>{t('listsHint')}</p>
+      {loading && <p role="status">{t('loading')}</p>}
+      {error && <p role="alert">{t('loadFailed')} <button onClick={() => void onListsChanged()}>{t('retry')}</button></p>}
 
       <ul className={styles.listCatalog}>
         {lists.map((list) => (

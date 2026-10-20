@@ -22,7 +22,7 @@ const SECTIONS: { title: TranslationKey; body: TranslationKey }[] = [
 
 /**
  * What the app can do, in the order somebody meeting it for the first time
- * needs it. Opened automatically once, on the first visit, because nothing else
+ * needs it. Available from the Help button; a short inline introduction
  * on screen explains that you can simply talk to it.
  */
 export const HelpSheet = ({ onClose }: Props) => {

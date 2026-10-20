@@ -4,6 +4,7 @@ import styles from '../App.module.css';
 type Props = {
   isSupported: boolean;
   isListening: boolean;
+  isStarting?: boolean;
   toggleListening: () => void;
   lang: Lang;
   setLang: (lang: Lang) => void;
@@ -15,6 +16,7 @@ type Props = {
 export const VoiceControls = ({
   isSupported,
   isListening,
+  isStarting,
   toggleListening,
   lang,
   setLang,
@@ -38,7 +40,7 @@ export const VoiceControls = ({
         className={`${styles.micButton} ${isListening ? styles.active : ''}`}
         onClick={toggleListening}
       >
-        {isListening ? t('listening') : t('startVoice')}
+        {isStarting ? t('voiceStarting') : isListening ? t('listening') : t('startVoice')}
       </button>
 
       {/* Waiting out the silence detector after every item is the slow part of

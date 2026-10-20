@@ -31,7 +31,7 @@ describe('listCache', () => {
   it('reads a snapshot written before the list column was renamed', () => {
     // Exactly what the previous release wrote: the list was called `username`.
     localStorage.setItem(
-      'list_snapshot_v1:ann',
+      'list_snapshot_v2:legacy:anonymous:ann',
       JSON.stringify({
         items: [{ id: 'a', name: 'молоко', note: null, count: 1, username: 'ann', bought: false }],
         savedAt: 1,
@@ -46,7 +46,7 @@ describe('listCache', () => {
 
   it('falls back to the list being read when an old row named no list at all', () => {
     localStorage.setItem(
-      'list_snapshot_v1:ann',
+      'list_snapshot_v2:legacy:anonymous:ann',
       JSON.stringify({ items: [{ id: 'a', name: 'молоко', count: 1, bought: false }], savedAt: 1 }),
     );
     expect(readSnapshot(LIST)?.items[0].list_id).toBe('ann');
@@ -54,9 +54,9 @@ describe('listCache', () => {
 
   it('answers null for a missing or unreadable snapshot', () => {
     expect(readSnapshot('nobody')).toBeNull();
-    localStorage.setItem('list_snapshot_v1:broken', '{not json');
+    localStorage.setItem('list_snapshot_v2:legacy:anonymous:broken', '{not json');
     expect(readSnapshot('broken')).toBeNull();
-    localStorage.setItem('list_snapshot_v1:odd', JSON.stringify({ items: 'nope' }));
+    localStorage.setItem('list_snapshot_v2:legacy:anonymous:odd', JSON.stringify({ items: 'nope' }));
     expect(readSnapshot('odd')).toBeNull();
   });
 
@@ -69,4 +69,13 @@ describe('listCache', () => {
     expect(readSnapshot(LIST)).toBeNull();
     expect(readSnapshot('dacha')).toBeNull();
   });
+});
+
+it('does not expose an unowned legacy snapshot to a new immutable account', () => {
+  localStorage.setItem('username', 'ann');
+  localStorage.setItem('token', 'legacy-token');
+  localStorage.setItem('list_snapshot_v1:ann', JSON.stringify({ items: [item], savedAt: 1 }));
+  expect(readSnapshot(LIST)?.items).toHaveLength(1);
+  localStorage.setItem('token', `x.${btoa(JSON.stringify({ sub: 'new-account-id' }))}.x`);
+  expect(readSnapshot(LIST)).toBeNull();
 });

@@ -2,9 +2,22 @@ import jwt from "jsonwebtoken";
 import { config } from "../config.js";
 import { hasListAccess } from "../lists.js";
 import { isValidListId } from "../validation.js";
+import db from "../db/index.js";
 
-export const signToken = (username) =>
-  jwt.sign({ username }, config.jwtSecret, { expiresIn: config.tokenTtl });
+export const signToken = (username) => {
+  const user = db.prepare('SELECT id, session_version FROM users WHERE username = ?').get(username);
+  if (!user) throw new Error('Account no longer exists');
+  return jwt.sign({ username, sub: user.id, version: user.session_version }, config.jwtSecret, { expiresIn: config.tokenTtl });
+};
+
+export const authenticateToken = (token) => {
+  const payload = jwt.verify(token, config.jwtSecret);
+  const user = db.prepare('SELECT id, username, session_version FROM users WHERE id = ?').get(payload.sub ?? '');
+  if (!user || payload.version !== user.session_version || payload.username !== user.username) {
+    throw new Error('Session revoked');
+  }
+  return payload;
+};
 
 /** Header carrying a refreshed token; the client swaps its stored one for it. */
 export const RENEWED_TOKEN_HEADER = "X-Renewed-Token";
@@ -16,7 +29,7 @@ export const verifyToken = (req, res, next) => {
 
   let payload;
   try {
-    payload = jwt.verify(token, config.jwtSecret);
+    payload = authenticateToken(token);
   } catch {
     return res.status(401).json({ error: "Invalid token" });
   }

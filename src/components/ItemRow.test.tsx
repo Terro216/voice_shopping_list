@@ -24,7 +24,7 @@ const setup = () => {
     onToggleBought: vi.fn(),
     onIncrement: vi.fn(),
     onDecrement: vi.fn(),
-    onEdit: vi.fn(),
+    onEdit: vi.fn().mockResolvedValue(true),
     onRemove: vi.fn(),
   };
   const { container } = render(<ItemRow item={item} {...handlers} />);
@@ -86,7 +86,7 @@ describe('ItemRow gestures', () => {
       onToggleBought: vi.fn(),
       onIncrement: vi.fn(),
       onDecrement: vi.fn(),
-      onEdit: vi.fn(),
+      onEdit: vi.fn().mockResolvedValue(true),
       onRemove: vi.fn(),
       onDragStart: vi.fn(),
     };
@@ -118,7 +118,7 @@ describe('ItemRow gestures', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Закрыть' }));
     await waitFor(() => expect(handlers.onEdit).toHaveBeenCalledWith('i1', {
       note: 'тот, в красной пачке',
-    }));
+    }, item));
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
@@ -137,7 +137,7 @@ describe('ItemRow gestures', () => {
   it('opens a note directly without checking off the item and pauses list speech', () => {
     const handlers = {
       onToggleBought: vi.fn(), onIncrement: vi.fn(), onDecrement: vi.fn(),
-      onEdit: vi.fn(), onRemove: vi.fn(), onEditorOpen: vi.fn(),
+      onEdit: vi.fn().mockResolvedValue(true), onRemove: vi.fn(), onEditorOpen: vi.fn(),
     };
     render(<ItemRow item={{ ...item, note: 'Безлактозное' }} {...handlers} />);
     fireEvent.click(screen.getByRole('button', { name: 'Изменить заметку: молоко' }));
@@ -146,7 +146,15 @@ describe('ItemRow gestures', () => {
     expect(document.activeElement).toBe(screen.getByRole('textbox', { name: /Заметка/ }));
   });
 
-  it('still checks off on a plain tap', () => {
+  it('swipes from the product name and suppresses the following synthetic click', () => {
+    const { handlers } = setup();
+    const name = screen.getByRole('checkbox', { name: /Отметить купленным/ });
+    swipe(name, 120);
+    fireEvent.click(name);
+    expect(handlers.onToggleBought).toHaveBeenCalledTimes(1);
+  });
+
+  it('still checks off on a plain tap' , () => {
     const { handlers } = setup();
     fireEvent.click(screen.getByLabelText(/Отметить купленным|Mark as bought/));
     expect(handlers.onToggleBought).toHaveBeenCalledWith('i1');

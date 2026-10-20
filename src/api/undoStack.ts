@@ -1,4 +1,5 @@
-import { Item, ItemEdit } from './items';
+import { getAccountId } from './client';
+import { Item, ItemEdit, type ItemExpectation } from './items';
 import type { Unit } from '../../shared/quantity.js';
 
 /**
@@ -10,24 +11,25 @@ import type { Unit } from '../../shared/quantity.js';
  * localStorage and picked up by the next session.
  */
 export type UndoAction =
-  | { kind: 'removeItem'; id: string }
+  | { kind: 'removeItem'; id: string; expected?: ItemExpectation }
   | { kind: 'restoreItems'; items: Item[] }
   | { kind: 'changeCount'; id: string; delta: number; unit?: Unit | null }
-  | { kind: 'setBought'; id: string; bought: boolean }
-  | { kind: 'editItem'; id: string; edit: ItemEdit }
+  | { kind: 'setBought'; id: string; bought: boolean; expected?: ItemExpectation }
+  | { kind: 'editItem'; id: string; edit: ItemEdit; expected?: ItemExpectation }
   | { kind: 'moveItem'; item: Item; from: string; to: string }
   | { kind: 'reorder'; ids: string[] };
 
 export type UndoEntry = {
+  id: string;
   label: string;
   action: UndoAction;
 };
 
 export const UNDO_STACK_LIMIT = 20;
 
-const KEY_PREFIX = 'undo_stack_v1:';
+const KEY_PREFIX = 'undo_stack_v2:';
 
-const key = (list: string) => `${KEY_PREFIX}${list}`;
+const key = (list: string) => `${KEY_PREFIX}${getAccountId()}:${list}`;
 
 const isEntry = (value: unknown): value is UndoEntry => {
   if (!value || typeof value !== 'object') return false;
@@ -56,6 +58,6 @@ export const writeUndoStack = (list: string, stack: UndoEntry[]) => {
 
 export const clearUndoStacks = () => {
   for (const name of Object.keys(localStorage)) {
-    if (name.startsWith(KEY_PREFIX)) localStorage.removeItem(name);
+    if (name.startsWith(`${KEY_PREFIX}${getAccountId()}:`) || name.startsWith('undo_stack_v1:')) localStorage.removeItem(name);
   }
 };

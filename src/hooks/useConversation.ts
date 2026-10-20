@@ -16,7 +16,7 @@ type Options = {
   getItems: () => Item[];
   editItem: (id: string, edit: ItemEdit, expected: Item) => Promise<boolean | undefined>;
   moveItem: (id: string, destination: string, expected: Item) => Promise<boolean>;
-  executeBasic: (command: SpeechCommand, text: string) => Promise<Item | undefined>;
+  executeBasic: (command: SpeechCommand, text: string, targets?: (Item | undefined)[]) => Promise<Item | undefined>;
 };
 
 export type VoiceChoice = { title: string; options: { id: string; label: string }[] };
@@ -88,7 +88,25 @@ export const useConversation = (options: Options) => {
       }
       if (command.type !== 'correct' && command.type !== 'move') {
         clearContext();
-        const item = await ops.executeBasic(command, text);
+        const targets: (Item | undefined)[] = [];
+        if (command.type === 'check' || command.type === 'remove') {
+          for (const query of command.queries) {
+            const matches = conversationMatches(ops.getItems().filter(item => command.type !== 'check' || !item.bought), query);
+            let selected = matches[0];
+            if (matches.length > 1) {
+              const id = await ask({ title: ops.t('voiceChooseItem'), options: matches.map(item => ({
+                id: item.id, label: `${item.name} · ${formatQuantity(item, ops.lang)}${item.note ? ` · ${item.note}` : ''}`,
+              })) });
+              if (!valid() || !id) return;
+              selected = matches.find(item => item.id === id)!;
+            }
+            targets.push(selected);
+          }
+          if (targets.some(item => item && !ops.getItems().some(current => itemFingerprint(current) === itemFingerprint(item)))) {
+            fail(ops.t('voiceItemChanged')); return;
+          }
+        }
+        const item = await ops.executeBasic(command, text, targets);
         if (!valid()) return;
         if (item) remember(item);
         // Do not let a following "no, three" repair a failed add.

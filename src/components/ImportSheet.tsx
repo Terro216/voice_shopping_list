@@ -8,7 +8,7 @@ import { isValidQuantity } from '../../shared/quantity.js';
 
 type Props = {
   initialText: string;
-  onAdd: (items: ParsedItem[]) => void;
+  onAdd: (items: ParsedItem[]) => Promise<ParsedItem[]>;
   onClose: () => void;
 };
 
@@ -20,6 +20,8 @@ type Props = {
 export const ImportSheet = ({ initialText, onAdd, onClose }: Props) => {
   const { t, lang } = useT();
   const [text, setText] = useState(initialText);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
 
   const parsed = useMemo(() => parseBulkText(text), [text]);
@@ -69,9 +71,19 @@ export const ImportSheet = ({ initialText, onAdd, onClose }: Props) => {
         </ul>
       )}
 
+      {failed && <p className={styles.error} role="alert">{t('importFailed')}</p>}
       {invalid && <p className={styles.error} role="alert">{t('invalidImportQuantity')}</p>}
       <div className={styles.sheetActions}>
-        <button type="button" onClick={() => onAdd(chosen)} disabled={chosen.length === 0 || invalid}>
+        <button type="button" onClick={async () => {
+          setBusy(true); setFailed(false);
+          try {
+            const remaining = await onAdd(chosen);
+            if (!remaining.length) { onClose(); return; }
+            setSkipped(prev => new Set([...prev, ...chosen.filter(item => !remaining.some(entry => parsedItemKey(entry) === parsedItemKey(item))).map(parsedItemKey)]));
+            setFailed(true);
+          } catch { setFailed(true); }
+          finally { setBusy(false); }
+        }} disabled={busy || chosen.length === 0 || invalid}>
           {t('importAdd', { count: chosen.length })}
         </button>
         <button type="button" onClick={onClose}>

@@ -24,3 +24,6 @@ npm-debug.log*
 .DS_Store
 *.code-workspace
 .eslintcache
+
+# Browser regression evidence
+browser-artifacts/

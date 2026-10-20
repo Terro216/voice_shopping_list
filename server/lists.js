@@ -23,15 +23,11 @@ const selectAccess = db.prepare(
   "SELECT 1 FROM list_access WHERE list_id = ? AND member = ?",
 );
 
-/**
- * The owner of a list. Falls back to the id itself for the rare row that
- * predates the `lists` table (an account whose list was never touched since),
- * matching the original "your list is named after you" rule.
- */
-export const listOwner = (id) => getList(id)?.owner ?? id;
+/** Ownership requires an existing list, never an inferred username. */
+export const listOwner = (id) => getList(id)?.owner ?? null;
 
 export const hasListAccess = (viewer, list) =>
-  listOwner(list) === viewer || Boolean(selectAccess.get(list, viewer));
+  Boolean(getList(list)) && (listOwner(list) === viewer || Boolean(selectAccess.get(list, viewer)));
 
 export const isListOwner = (viewer, list) => listOwner(list) === viewer;
 
@@ -62,14 +58,12 @@ export const accessibleLists = (viewer) => {
   const joined = db
     .prepare(
       `SELECT a.list_id AS id, l.name AS name, l.owner AS owner
-         FROM list_access a LEFT JOIN lists l ON l.id = a.list_id
+         FROM list_access a JOIN lists l ON l.id = a.list_id
         WHERE a.member = ? ORDER BY a.granted_at`,
     )
     .all(viewer)
     .filter((row) => row.owner !== viewer)
-    // A joined list whose `lists` row is missing predates this table: it is its
-    // owner's personal list, named after them.
-    .map((row) => summarize({ id: row.id, name: row.name ?? row.id, owner: row.owner ?? row.id }, false));
+    .map((row) => summarize(row, false));
 
   return [...owned, ...joined];
 };

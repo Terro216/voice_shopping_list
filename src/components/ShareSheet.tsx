@@ -29,22 +29,20 @@ export const ShareSheet = ({ list, listName, owned, onClose, onLeft }: Props) =>
   const { t } = useT();
   const [token, setToken] = useState<string | null>(null);
   const [members, setMembers] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
 
   const loadMembers = useCallback(async () => {
+    setLoading(true);
+    setFailed(false);
     try {
+      if (owned) setToken((await fetchShareToken(list)).token);
       const data = await fetchMembers(list);
       setMembers(data.members);
     } catch {
-      setMembers([]);
-    }
-  }, [list]);
-
-  useEffect(() => {
-    if (!owned) return;
-    fetchShareToken(list)
-      .then((data) => setToken(data.token))
-      .catch(() => setToken(null));
-  }, [owned, list]);
+      setFailed(true);
+    } finally { setLoading(false); }
+  }, [list, owned]);
 
   useEffect(() => {
     void loadMembers();
@@ -92,13 +90,15 @@ export const ShareSheet = ({ list, listName, owned, onClose, onLeft }: Props) =>
 
   return (
     <Sheet title={t('shareTitle')} onClose={onClose}>
+      {loading && <p role="status">{t('loading')}</p>}
+      {failed && <p role="alert">{t('loadFailed')} <button onClick={() => void loadMembers()}>{t('retry')}</button></p>}
       {owned ? (
         <>
           <p className={styles.sheetHint}>{t('shareHint')}</p>
           <input
             className={styles.linkField}
             readOnly
-            value={token ? inviteUrl(token) : '…'}
+            value={token ? inviteUrl(token) : ''}
             onFocus={(e) => e.currentTarget.select()}
             aria-label={t('copyLink')}
           />
@@ -112,7 +112,7 @@ export const ShareSheet = ({ list, listName, owned, onClose, onLeft }: Props) =>
           </div>
 
           <h3 className={styles.sheetSubtitle}>{t('members')}</h3>
-          {members.length === 0 ? (
+          {members.length === 0 && !loading && !failed ? (
             <p className={styles.sheetHint}>{t('noMembers')}</p>
           ) : (
             <ul className={styles.memberList}>

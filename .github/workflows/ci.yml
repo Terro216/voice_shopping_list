@@ -27,3 +27,15 @@ jobs:
       # Boots the real server against a throwaway database and exercises the
       # API, the access rules and the socket handshake end to end.
       - run: npm run smoke
+
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm run test:browser
+        env:
+          BROWSER_ARTIFACTS: browser-artifacts
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-regressions
+          path: browser-artifacts

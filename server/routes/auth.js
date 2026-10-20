@@ -7,6 +7,8 @@ import { signToken, verifyToken } from "../middleware/auth.js";
 import { isValidNewUsername, isPlausibleUsername, isValidPassword } from "../validation.js";
 import { ensureUserList } from "../lists.js";
 
+import { revokeSessions, revokeRoom, notifyCatalog } from "../realtime.js";
+
 const router = express.Router();
 
 router.post("/register", async (req, res) => {
@@ -50,13 +52,19 @@ router.post("/login", async (req, res) => {
     return res.status(401).json({ error: "Invalid credentials" });
   }
 
+  // bcrypt yields. Do not authenticate a stale password or a replacement
+  // account created while the comparison was running.
+  const current = db.prepare('SELECT id, session_version, password_hash FROM users WHERE id = ?').get(user.id);
+  if (!current || current.session_version !== user.session_version || current.password_hash !== user.password_hash) {
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+
   // Accounts made before lists became first-class have no row for their own list.
   ensureUserList(user.username);
   res.json({ token: signToken(user.username), username: user.username });
 });
 
-// Tokens are stateless, so previously issued ones stay valid until they expire;
-// the caller gets a fresh one to keep using.
+// Password changes revoke every previous token, including connected sockets.
 router.post("/password", verifyToken, async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   if (typeof currentPassword !== "string" || !currentPassword) {
@@ -68,11 +76,14 @@ router.post("/password", verifyToken, async (req, res) => {
 
   const user = db.prepare("SELECT * FROM users WHERE username = ?").get(req.user.username);
   if (!user || !(await bcrypt.compare(currentPassword, user.password_hash))) {
-    return res.status(401).json({ error: "Current password is wrong" });
+    return res.status(400).json({ error: "Current password is wrong", code: "WRONG_PASSWORD" });
   }
 
   const hash = await bcrypt.hash(newPassword, config.bcryptRounds);
-  db.prepare("UPDATE users SET password_hash = ? WHERE username = ?").run(hash, user.username);
+  const changed = db.prepare("UPDATE users SET password_hash = ?, session_version = session_version + 1 WHERE id = ? AND session_version = ?")
+    .run(hash, req.user.sub, req.user.version);
+  if (!changed.changes) return res.status(401).json({ error: "Session revoked" });
+  revokeSessions(req, req.user.sub);
 
   res.json({ token: signToken(user.username), username: user.username });
 });
@@ -88,10 +99,19 @@ router.delete("/account", verifyToken, async (req, res) => {
   const username = req.user.username;
   const user = db.prepare("SELECT * FROM users WHERE username = ?").get(username);
   if (!user || !(await bcrypt.compare(password, user.password_hash))) {
-    return res.status(401).json({ error: "Password is wrong" });
+    return res.status(400).json({ error: "Password is wrong", code: "WRONG_PASSWORD" });
   }
 
+  // bcrypt yields: another request can revoke this session while it runs.
+  const current = db.prepare('SELECT session_version FROM users WHERE id = ?').get(req.user.sub);
+  if (!current || current.session_version !== req.user.version) return res.status(401).json({ error: 'Session revoked' });
+  const affected = db.prepare('SELECT id FROM lists WHERE owner = ?').all(username);
+  const memberships = db.prepare('SELECT list_id FROM list_access WHERE member = ?').all(username);
+  for (const { list_id } of memberships) notifyCatalog(req, list_id);
+  for (const { id } of affected) { notifyCatalog(req, id); revokeRoom(req, id); }
+  revokeSessions(req, req.user.sub);
   db.transaction(() => {
+    db.prepare('DELETE FROM mutation_receipts WHERE user_id = ?').run(req.user.sub);
     // Every list this account owns goes, not just the one named after them.
     const owned = db.prepare("SELECT id FROM lists WHERE owner = ?").all(username).map((r) => r.id);
     const ids = owned.includes(username) ? owned : [...owned, username];

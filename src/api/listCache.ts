@@ -1,3 +1,4 @@
+import { getAccountId, getToken } from './client';
 import { Item } from './items';
 
 /**
@@ -5,13 +6,10 @@ import { Item } from './items';
  * shows the list instead of an empty screen. The offline queue already survives
  * a reload; without this the items it refers to did not.
  */
-const KEY_PREFIX = 'list_snapshot_v1:';
+const KEY_PREFIX = 'list_snapshot_v2:';
 
-// Enough for any realistic shopping list, small enough that a handful of shared
-// lists cannot fill the localStorage quota.
-const MAX_CACHED_ITEMS = 500;
 
-const key = (list: string) => `${KEY_PREFIX}${list}`;
+const key = (list: string) => `${KEY_PREFIX}${getAccountId()}:${list}`;
 
 export type Snapshot = {
   items: Item[];
@@ -20,7 +18,8 @@ export type Snapshot = {
 
 export const readSnapshot = (list: string): Snapshot | null => {
   try {
-    const raw = localStorage.getItem(key(list));
+    const legacy = getToken() && localStorage.getItem('username') && getAccountId().startsWith('legacy:');
+    const raw = localStorage.getItem(key(list)) ?? (legacy ? localStorage.getItem(`list_snapshot_v1:${list}`) : null);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.items)) return null;
@@ -39,7 +38,7 @@ export const readSnapshot = (list: string): Snapshot | null => {
 
 export const writeSnapshot = (list: string, items: Item[]) => {
   try {
-    const payload: Snapshot = { items: items.slice(0, MAX_CACHED_ITEMS), savedAt: Date.now() };
+    const payload: Snapshot = { items: items, savedAt: Date.now() };
     localStorage.setItem(key(list), JSON.stringify(payload));
   } catch {
     // Quota exceeded or storage disabled — the cache is an optimisation, not a
@@ -47,8 +46,10 @@ export const writeSnapshot = (list: string, items: Item[]) => {
   }
 };
 
+export const removeSnapshot = (list: string) => localStorage.removeItem(key(list));
+
 export const clearSnapshots = () => {
   for (const name of Object.keys(localStorage)) {
-    if (name.startsWith(KEY_PREFIX)) localStorage.removeItem(name);
+    if (name.startsWith(`${KEY_PREFIX}${getAccountId()}:`) || name.startsWith('list_snapshot_v1:')) localStorage.removeItem(name);
   }
 };

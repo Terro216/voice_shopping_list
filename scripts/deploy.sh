@@ -14,6 +14,9 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+say "Building the candidate image"
+docker compose build web
+
 say "Backing up the database"
 if docker compose ps --status running --quiet web | grep -q .; then
   # Taken from inside the container, which owns the data volume. Deliberately
@@ -33,17 +36,21 @@ if docker compose ps --status running --quiet web | grep -q .; then
       .then(() => { db.close(); console.log("Snapshot: " + target); })
       .catch((err) => { console.error("Backup failed: " + err.message); process.exit(1); });
   '
+elif [ -f data/database.sqlite ]; then
+  # A stopped service can still contain the only copy of an existing database.
+  # The maintenance entrypoint takes a SQLite snapshot without starting the app.
+  docker compose run --rm --no-deps -T --entrypoint node web scripts/backup.mjs
 else
-  echo "Container is not running — nothing to back up yet, continuing."
+  echo "No existing database — first deployment."
 fi
 
 say "Building and restarting"
-docker compose up -d --build
+docker compose up -d --no-build web
 
 say "Waiting for the app to answer"
 for attempt in $(seq 1 30); do
   if docker compose exec -T web node -e "
-      fetch('http://127.0.0.1:3000/api/push/public-key')
+      fetch('http://127.0.0.1:3000/api/health')
         .then((r) => process.exit(r.ok ? 0 : 1))
         .catch(() => process.exit(1))
     " 2>/dev/null; then

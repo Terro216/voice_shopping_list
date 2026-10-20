@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
+import { ApiError, announceSessionChange } from '../api/client';
 import { changePassword, deleteAccount } from '../api/auth';
 import { cue, isSoundEnabled, setSoundEnabled } from '../utils/feedback';
 import { LANGUAGES, useT, type Lang } from '../i18n';
@@ -46,11 +47,12 @@ export const SettingsSheet = ({
     try {
       const result = await changePassword(currentPassword, newPassword);
       localStorage.setItem('token', result.token);
+      announceSessionChange();
       setCurrentPassword('');
       setNewPassword('');
       toast.success(t('passwordChanged'));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('somethingWrong'));
+      toast.error(err instanceof ApiError && err.code === 'WRONG_PASSWORD' ? t('wrongPassword') : t('somethingWrong'));
     } finally {
       setBusy(false);
     }
@@ -64,7 +66,7 @@ export const SettingsSheet = ({
       toast.success(t('accountDeleted'));
       onLogout();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('somethingWrong'));
+      toast.error(err instanceof ApiError && err.code === 'WRONG_PASSWORD' ? t('wrongPassword') : t('somethingWrong'));
     } finally {
       setBusy(false);
     }

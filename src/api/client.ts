@@ -2,13 +2,15 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code?: string,
+    readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = 'ApiError';
   }
 }
 
-/** Thrown when the request never reached the server (offline, DNS, timeout). */
+/** The response is unknown; the server may already have committed the request. */
 export class NetworkError extends Error {
   constructor(readonly cause?: unknown) {
     super('Network request failed');
@@ -30,20 +32,29 @@ export const RATE_LIMITED_EVENT = 'rate-limited';
 export const notifyRateLimited = () => window.dispatchEvent(new Event(RATE_LIMITED_EVENT));
 
 export const getToken = () => localStorage.getItem('token');
+export const SESSION_CHANGED_EVENT = 'session-changed';
+export const CATALOG_CHANGED_EVENT = 'catalog-changed';
+
+export const getAccountId = () => {
+  try {
+    const payload = JSON.parse(atob((getToken() ?? '').split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    if (typeof payload.sub === 'string') return payload.sub as string;
+  } catch { /* A pre-upgrade token has no immutable subject. */ }
+  return `legacy:${localStorage.getItem('username') ?? 'anonymous'}`;
+};
+
+export const sessionKey = () => `${getAccountId()}:${localStorage.getItem('session_generation') ?? ''}`;
+export const announceSessionChange = () => window.dispatchEvent(new Event(SESSION_CHANGED_EVENT));
 
 /**
- * Identifies this browser tab. The server echoes it back on `list_updated` so
- * the tab that made a change can skip refetching its own echo — otherwise every
- * tap round-trips into a full list reload and can briefly flash the old value.
+ * Identifies this page instance. sessionStorage cannot provide this identity:
+ * a window opened by another tab inherits a copy of that storage.
  */
 export const CLIENT_ID = (() => {
-  const stored = sessionStorage.getItem('client_id');
-  if (stored) return stored;
   const id =
     typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
       : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  sessionStorage.setItem('client_id', id);
   return id;
 })();
 
@@ -60,9 +71,9 @@ export const authHeaders = (): Record<string, string> => {
  * The server hands back a refreshed token as the session nears its expiry;
  * storing it here is what keeps a daily user from being logged out mid-trip.
  */
-export const adoptRenewedToken = (res: Response) => {
+export const adoptRenewedToken = (res: Response, sentToken = getToken()) => {
   const renewed = res.headers.get('X-Renewed-Token');
-  if (renewed) localStorage.setItem('token', renewed);
+  if (renewed && getToken() === sentToken) localStorage.setItem('token', renewed);
 };
 
 export const notifyAuthExpired = () => {
@@ -76,34 +87,53 @@ type RequestOptions = {
   auth?: boolean;
   cache?: RequestCache;
   signal?: AbortSignal;
+  mutationId?: string;
+  timeoutMs?: number;
 };
 
 export const request = async <T>(url: string, options: RequestOptions = {}): Promise<T> => {
   const { method = 'GET', body, auth = true } = options;
+  const token = getToken();
+  const session = sessionKey();
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  options.signal?.addEventListener('abort', abort, { once: true });
+  if (options.signal?.aborted) controller.abort();
+  const timeout = setTimeout(abort, options.timeoutMs ?? 15_000);
 
   let res: Response;
+  let data;
   try {
     res = await fetch(url, {
       method,
-      headers: auth ? authHeaders() : { 'Content-Type': 'application/json' },
+      headers: { ...(auth ? authHeaders() : { 'Content-Type': 'application/json' }),
+        ...(options.mutationId ? { 'X-Mutation-Id': options.mutationId } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
       cache: options.cache,
-      signal: options.signal,
+      signal: options.signal && AbortSignal.any ? AbortSignal.any([options.signal, controller.signal]) : controller.signal,
+    });
+    data = await res.json().catch((error) => {
+      if (controller.signal.aborted || options.signal?.aborted) throw error;
+      return null;
     });
   } catch (err) {
     throw new NetworkError(err);
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', abort);
   }
 
-  if (auth) adoptRenewedToken(res);
-
-  const data = await res.json().catch(() => null);
+  if (auth && sessionKey() !== session) throw new NetworkError('Session changed');
+  if (auth) adoptRenewedToken(res, token);
 
   if (!res.ok) {
-    if (auth && res.status === 401) notifyAuthExpired();
+    if (auth && res.status === 401 && getToken() === token) notifyAuthExpired();
     if (res.status === 429) notifyRateLimited();
     const message =
       data && typeof data.error === 'string' ? data.error : `Request failed (${res.status})`;
-    throw new ApiError(res.status, message);
+    const retryAfter = res.headers.get('Retry-After');
+    const retryAfterMs = retryAfter ? (/^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now())) : undefined;
+    throw new ApiError(res.status, message, data?.code, retryAfterMs);
   }
 
   return data as T;

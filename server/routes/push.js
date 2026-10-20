@@ -22,8 +22,7 @@ const isValidSubscription = (sub) =>
   typeof sub.keys?.p256dh === "string" &&
   typeof sub.keys?.auth === "string";
 
-// A device subscribes to exactly one list (endpoint is the primary key), so
-// subscribing from another list simply re-points the device.
+// A device may subscribe to multiple lists. One device has one signed-in owner.
 router.post("/subscribe", verifyToken, writeLimiter, (req, res) => {
   if (!pushEnabled) return res.status(503).json({ error: "Push is not configured" });
 
@@ -35,10 +34,11 @@ router.post("/subscribe", verifyToken, writeLimiter, (req, res) => {
     return res.status(403).json({ error: "No access to this list" });
   }
 
+  db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ? AND subscriber != ?").run(subscription.endpoint, req.user.username);
   db.prepare(
     `INSERT INTO push_subscriptions (endpoint, subscriber, list_id, p256dh, auth)
      VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(endpoint) DO UPDATE SET
+     ON CONFLICT(endpoint, list_id) DO UPDATE SET
        subscriber = excluded.subscriber,
        list_id = excluded.list_id,
        p256dh = excluded.p256dh,
@@ -55,13 +55,12 @@ router.post("/subscribe", verifyToken, writeLimiter, (req, res) => {
 });
 
 router.delete("/subscribe", verifyToken, writeLimiter, (req, res) => {
-  const { endpoint } = req.body;
+  const { endpoint, list } = req.body;
+  if (list !== undefined && !isValidListId(list)) return res.status(400).json({ error: "Invalid list" });
   if (typeof endpoint !== "string") return res.status(400).json({ error: "Invalid endpoint" });
 
-  db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ? AND subscriber = ?").run(
-    endpoint,
-    req.user.username,
-  );
+  if (list === undefined) db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ? AND subscriber = ?").run(endpoint, req.user.username);
+  else db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ? AND subscriber = ? AND list_id = ?").run(endpoint, req.user.username, list);
   res.json({ success: true });
 });
 
@@ -70,10 +69,10 @@ router.get("/status", verifyToken, readLimiter, (req, res) => {
   const { endpoint } = req.query;
   if (typeof endpoint !== "string") return res.status(400).json({ error: "Invalid endpoint" });
 
-  const row = db
+  const rows = db
     .prepare("SELECT list_id FROM push_subscriptions WHERE endpoint = ? AND subscriber = ?")
-    .get(endpoint, req.user.username);
-  res.json({ list: row?.list_id ?? null });
+    .all(endpoint, req.user.username);
+  res.json({ list: rows[0]?.list_id ?? null, lists: rows.map(row => row.list_id) });
 });
 
 export default router;

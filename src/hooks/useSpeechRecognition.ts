@@ -17,6 +17,7 @@ type SpeechRecognitionLike = {
   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
   onend: (() => void) | null;
+  onstart?: (() => void) | null;
   start: () => void;
   stop: () => void;
   abort?: () => void;
@@ -36,7 +37,7 @@ const getSpeechRecognition = (): SpeechRecognitionConstructor | undefined =>
 
 // Errors after which the engine will not deliver results until the user acts,
 // so keeping the "listening" state would just lie to them.
-const FATAL_ERRORS = new Set(['not-allowed', 'service-not-allowed', 'audio-capture']);
+const FATAL_ERRORS = new Set(['not-allowed', 'service-not-allowed', 'audio-capture', 'network', 'language-not-supported', 'aborted']);
 
 const RESTART_DELAY_MS = 300;
 
@@ -73,6 +74,9 @@ export const useSpeechRecognition = (
   onFatalError?: (error: string) => void,
 ) => {
   const [isListening, setIsListening] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
+  const startTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const restartCount = useRef(0);
   const [interimText, setInterimText] = useState('');
   const [isSupported] = useState(() => Boolean(getSpeechRecognition()));
 
@@ -124,7 +128,11 @@ export const useSpeechRecognition = (
     rec.interimResults = true;
     rec.lang = language;
 
+    rec.onstart = () => { clearTimeout(startTimer.current); setIsStarting(false); };
     rec.onresult = (event) => {
+      clearTimeout(startTimer.current);
+      setIsStarting(false);
+      restartCount.current = 0;
       // Opening an editor stops list dictation. Ignore delayed results from
       // that old session so words meant for a note never become list commands.
       if (!acceptResultsRef.current) return;
@@ -165,6 +173,8 @@ export const useSpeechRecognition = (
         isListeningRef.current = false;
         clearTimeout(restartTimerRef.current);
         setIsListening(false);
+        setIsStarting(false);
+        clearTimeout(startTimer.current);
         // Whatever was already understood should still be applied.
         flushRef.current();
         // The mic button silently going quiet looks like a broken app; say why.
@@ -188,6 +198,15 @@ export const useSpeechRecognition = (
         return;
       }
 
+      if (++restartCount.current > 5) {
+        isListeningRef.current = false;
+        setIsListening(false);
+        setIsStarting(false);
+        clearTimeout(startTimer.current);
+        onFatalErrorRef.current?.('network');
+        flushRef.current();
+        return;
+      }
       // The revision arrives in the *next* session, so a phrase still being
       // assembled gets its settle window started again from the restart rather
       // than expiring during it.
@@ -200,7 +219,10 @@ export const useSpeechRecognition = (
           try {
             recognitionRef.current.start();
           } catch {
-            // already started — fine
+            isListeningRef.current = false;
+            setIsListening(false);
+            setIsStarting(false);
+            onFatalErrorRef.current?.('start-failed');
           }
         }
       }, RESTART_DELAY_MS);
@@ -210,9 +232,11 @@ export const useSpeechRecognition = (
 
     return () => {
       acceptResultsRef.current = false;
+      clearTimeout(startTimer.current);
       clearTimeout(restartTimerRef.current);
       clearTimeout(settleTimerRef.current);
       utteranceRef.current = '';
+      rec.onstart = null;
       rec.onend = null;
       rec.onresult = null;
       rec.onerror = null;
@@ -228,6 +252,8 @@ export const useSpeechRecognition = (
     isListeningRef.current = false;
     if (discardLateResults) acceptResultsRef.current = false;
     setIsListening(false);
+    setIsStarting(false);
+    clearTimeout(startTimer.current);
     clearTimeout(restartTimerRef.current);
     flushUtterance();
     try {
@@ -243,13 +269,18 @@ export const useSpeechRecognition = (
     setIsListening(next);
     if (next) {
       acceptResultsRef.current = true;
+      restartCount.current = 0;
+      setIsStarting(true);
+      clearTimeout(startTimer.current);
+      startTimer.current = setTimeout(() => { stopListening(true); onFatalErrorRef.current?.('start-failed'); }, 10_000);
       utteranceRef.current = '';
       setInterimText('');
       cue('listenStart');
       try {
         recognitionRef.current?.start();
       } catch {
-        // already started — fine
+        stopListening(true);
+        onFatalErrorRef.current?.('start-failed');
       }
     } else {
       cue('listenStop');
@@ -257,5 +288,5 @@ export const useSpeechRecognition = (
     }
   }, [stopListening]);
 
-  return { isListening, toggleListening, stopListening, interimText, isSupported, flushNow: flushUtterance };
+  return { isStarting, isListening, toggleListening, stopListening, interimText, isSupported, flushNow: flushUtterance };
 };

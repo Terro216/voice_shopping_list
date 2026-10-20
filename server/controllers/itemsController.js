@@ -18,12 +18,14 @@ import {
 // list id in `req.list` — the token says who is asking, that says whether they
 // may. See the note at the top of server/lists.js for how lists are identified.
 
-// Broadcasts to everyone viewing the list. The originating tab identifies
-// itself with X-Client-Id so it can ignore the echo of its own change instead
-// of refetching (and briefly flickering back to the pre-optimistic value).
+// Broadcasts after commit. The actor identifies a page instance; current
+// clients reconcile all echoes with guards for in-flight local changes.
 const notifyList = (req, pushLabel, list = req.list) => {
-  req.app.get("io").to(`list_${list}`).emit("list_updated", { actor: req.get("X-Client-Id") || null });
-  if (pushLabel) scheduleListPush(list, req.user.username, pushLabel);
+  const notify = () => {
+    req.app.get("io").to(`list_${list}`).emit("list_updated", { actor: req.get("X-Client-Id") || null });
+    if (pushLabel) scheduleListPush(list, req.user.username, pushLabel);
+  };
+  if (req.afterCommit) req.afterCommit(notify); else notify();
 };
 
 const matchesExpectation = (item, expected) => expected &&
@@ -276,19 +278,22 @@ export const updateItem = (req, res) => {
   const hasNote = req.body.note !== undefined;
   const hasCount = req.body.count !== undefined;
   const hasUnit = req.body.unit !== undefined;
+  const hasBought = req.body.bought !== undefined;
 
   const name = hasName ? normalizeItemName(req.body.name) : null;
   const note = hasNote ? normalizeItemNote(req.body.note) : null;
 
-  if (!isValidItemId(id) || (!hasName && !hasNote && !hasCount && !hasUnit)) {
+  if (!isValidItemId(id) || (!hasName && !hasNote && !hasCount && !hasUnit && !hasBought)) {
     return res.status(400).json({ error: "Invalid fields" });
   }
   if ((hasName && !name) || (hasNote && note === false)) {
     return res.status(400).json({ error: "Invalid fields" });
   }
 
+  if (hasBought && typeof req.body.bought !== "boolean") return res.status(400).json({ error: "Invalid bought flag" });
   const assignments = [];
   const values = [];
+  if (hasBought) { assignments.push("bought = ?", "bought_at = ?"); values.push(req.body.bought ? 1 : 0, req.body.bought ? Date.now() : null); }
   if (hasName) {
     assignments.push("name = ?");
     values.push(name);
@@ -307,6 +312,7 @@ export const updateItem = (req, res) => {
         ...req.body.expected,
         ...(hasName ? { name } : {}), ...(hasNote ? { note } : {}),
         ...(hasCount ? { count: req.body.count } : {}), ...(hasUnit ? { unit: req.body.unit } : {}),
+        ...(hasBought ? { bought: req.body.bought } : {}),
       });
       return alreadyApplied ? 208 : 409;
     }
@@ -367,9 +373,10 @@ export const setItemBought = (req, res) => {
   }
 
   const item = db
-    .prepare(`SELECT name FROM items WHERE id = ? AND list_id = ? AND ${LIVE}`)
+    .prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE id = ? AND list_id = ? AND ${LIVE}`)
     .get(id, req.list);
   if (!item) return res.status(404).json({ error: "Item not found" });
+  if (req.body.expected && !matchesExpectation(item, req.body.expected)) return res.status(409).json({ error: "Item changed" });
 
   db.prepare("UPDATE items SET bought = ?, bought_at = ? WHERE id = ? AND list_id = ?").run(
     bought ? 1 : 0,
@@ -422,10 +429,23 @@ export const reorderItems = (req, res) => {
   res.json({ success: true, ordered: applied });
 };
 
+const selectedIds = (req, res) => {
+  const ids = req.body?.ids;
+  if (ids !== undefined && (!Array.isArray(ids) || ids.length > MAX_ORDER_IDS || !ids.every(isValidItemId))) {
+    res.status(400).json({ error: "Invalid item ids" });
+    return false;
+  }
+  return ids === undefined ? { clause: '', values: [] } : {
+    clause: ` AND id IN (${ids.map(() => '?').join(',') || 'NULL'})`, values: ids,
+  };
+};
+
 export const clearBought = (req, res) => {
+  const selected = selectedIds(req, res);
+  if (!selected) return;
   const { changes } = db
-    .prepare(`UPDATE items SET deleted_at = ? WHERE list_id = ? AND bought = 1 AND ${LIVE}`)
-    .run(Date.now(), req.list);
+    .prepare(`UPDATE items SET deleted_at = ? WHERE list_id = ? AND bought = 1 AND ${LIVE}${selected.clause}`)
+    .run(Date.now(), req.list, ...selected.values);
 
   if (changes > 0) {
     notifyList(req, `cleared bought (${changes})`);
@@ -440,8 +460,9 @@ export const deleteItem = (req, res) => {
   }
 
   const item = db
-    .prepare(`SELECT name FROM items WHERE id = ? AND list_id = ? AND ${LIVE}`)
+    .prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE id = ? AND list_id = ? AND ${LIVE}`)
     .get(id, req.list);
+  if (item && req.body?.expected && !matchesExpectation(item, req.body.expected)) return res.status(409).json({ error: "Item changed" });
   db.prepare(`UPDATE items SET deleted_at = ? WHERE id = ? AND list_id = ? AND ${LIVE}`).run(
     Date.now(),
     id,
@@ -478,9 +499,11 @@ export const restoreItem = (req, res) => {
 
 /** Empties the deleted drawer for good. */
 export const purgeDeleted = (req, res) => {
+  const selected = selectedIds(req, res);
+  if (!selected) return;
   const { changes } = db
-    .prepare("DELETE FROM items WHERE list_id = ? AND deleted_at IS NOT NULL")
-    .run(req.list);
+    .prepare(`DELETE FROM items WHERE list_id = ? AND deleted_at IS NOT NULL${selected.clause}`)
+    .run(req.list, ...selected.values);
   if (changes > 0) notifyList(req, null);
   res.json({ success: true, purged: changes });
 };

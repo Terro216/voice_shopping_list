@@ -200,16 +200,17 @@ describe('voice corrections through the real list hook', () => {
     expect(result.current.items).toEqual(rows);
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   });
-  it('retains move undo for retry when the destination is temporarily unavailable', async () => {
+  it('durably queues move undo and retries after temporary unavailability', async () => {
     rows = [milk()];
     const { result, say } = await mount();
     await say('перенеси молоко в список Дача');
     const respond = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation(async (input, init) => init?.method === 'POST' ? json({ error: 'Unavailable' }, 503) : respond(input, init));
-    await act(async () => { await expect(result.current.undo()).rejects.toThrow(); });
-    expect(result.current.items).toEqual([]);
+    await act(async () => { expect(await result.current.undo()).toBe('молоко'); });
+    expect(queuedMutationCount()).toBe(1);
     vi.mocked(fetch).mockImplementation(respond);
-    await say('отмена');
+    await act(async () => { await result.current.retrySync(); });
+    expect(queuedMutationCount()).toBe(0);
     expect(result.current.items[0]).toMatchObject(milk());
   });
   it('queues add, correction, move and undo in order offline and survives reload', async () => {

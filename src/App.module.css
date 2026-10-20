@@ -978,3 +978,17 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+/* Let names retain a useful line length even on a 320px phone. */
+@media (max-width: 460px) {
+  .header { flex-wrap: wrap; }
+  .title { flex: 1 0 100%; }
+  .headerActions { width: 100%; justify-content: flex-start; }
+  .itemRow { flex-wrap: wrap; }
+  .itemMain { flex: 1 1 calc(100% - 44px); }
+  .itemControls { width: 100%; justify-content: flex-end; }
+  .itemText { flex: 1; }
+}
+.syncDetails { width: 100%; overflow-wrap: anywhere; }
+.syncDetails pre { white-space: pre-wrap; }
+.manualPreview { width: 100%; font-size: .9rem; color: var(--text-soft); margin: 0 0 .5rem; }

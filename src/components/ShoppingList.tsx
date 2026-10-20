@@ -17,9 +17,10 @@ import { ListsSheet } from './ListsSheet';
 import { HelpSheet } from './HelpSheet';
 import { DeletedDrawer } from './DeletedDrawer';
 import { Sheet } from './Sheet';
-import { type SpeechCommand, ParsedItem } from '../utils/speechParser';
+import { type SpeechCommand, ParsedItem, parseBulkText } from '../utils/speechParser';
 import { takeMicIntent, takeSharedText } from '../launchIntent';
-import { findBestMatch } from '../utils/matchItem';
+import { legacyMutations } from '../api/offlineQueue';
+import { SyncSheet } from './SyncSheet';
 import { cue, haptic } from '../utils/feedback';
 import { LANGUAGES, useT, type Lang } from '../i18n';
 import type { ListSummary } from '../api/lists';
@@ -32,6 +33,8 @@ type Props = {
   list: string; // the list being viewed — not necessarily the viewer's own
   viewer: string; // the logged-in account
   lists: ListSummary[];
+  catalogLoading?: boolean;
+  catalogError?: boolean;
   onSelectList: (list: string) => void;
   onListsChanged: () => Promise<void> | void;
   lang: Lang;
@@ -53,6 +56,8 @@ export const ShoppingList = ({
   list,
   viewer,
   lists,
+  catalogLoading,
+  catalogError,
   onSelectList,
   onListsChanged,
   lang,
@@ -68,7 +73,7 @@ export const ShoppingList = ({
     otherViewers,
     isOffline,
     pendingCount,
-    accessDenied,
+    accessDenied, loading, loadError, deletedError, deletedLoading, failedCount, retrySync, retryDeleted, lastUndoId,
     addItem,
     removeItem,
     editItem,
@@ -85,9 +90,11 @@ export const ShoppingList = ({
     undo,
   } = useShoppingList(list, viewer);
   const [newItemName, setNewItemName] = useState('');
-  const [sheet, setSheet] = useState<'none' | 'share' | 'settings' | 'import' | 'lists' | 'help'>(
+  const [sheet, setSheet] = useState<'none' | 'share' | 'settings' | 'import' | 'lists' | 'help' | 'sync'>(
     'none',
   );
+  const [showIntro, setShowIntro] = useState(() => !localStorage.getItem(HELP_SEEN_KEY));
+  const [adding, setAdding] = useState(false);
   const [importText, setImportText] = useState('');
   const { frequent, matches, refreshFrequent } = useSuggestions(list, newItemName);
 
@@ -106,9 +113,9 @@ export const ShoppingList = ({
     [addItem, refreshFrequent],
   );
 
-  const performUndo = useCallback(async () => {
+  const performUndo = useCallback(async (actionId?: string) => {
     try {
-      const label = await undo();
+      const label = await undo(actionId);
       if (label) {
         toast(t('undone', { label }), { icon: '↩️', id: ITEM_TOAST });
       } else {
@@ -121,7 +128,8 @@ export const ShoppingList = ({
 
   /** Toast that offers to take the action back — the store-aisle safety net. */
   const toastWithUndo = useCallback(
-    (message: string) => {
+    (message: string, actionId = lastUndoId()) => {
+      if (!actionId) return;
       toast(
         (instance) => (
           <span className={styles.toastWithAction}>
@@ -130,7 +138,7 @@ export const ShoppingList = ({
               type="button"
               onClick={() => {
                 toast.dismiss(instance.id);
-                void performUndo();
+                void performUndo(actionId);
               }}
             >
               {t('returnAction')}
@@ -140,11 +148,11 @@ export const ShoppingList = ({
         { icon: '🗑', id: ITEM_TOAST },
       );
     },
-    [performUndo, t],
+    [performUndo, t, lastUndoId],
   );
 
   const executeBasic = useCallback(
-    async (command: SpeechCommand, text: string) => {
+    async (command: SpeechCommand, text: string, targets?: (Item | undefined)[]) => {
       switch (command.type) {
         case 'add': {
           if (command.items.length === 0) {
@@ -203,18 +211,18 @@ export const ShoppingList = ({
         case 'remove': {
           const found: string[] = [];
           const missed: string[] = [];
-          for (const query of command.queries) {
-            const item = findBestMatch(getItems(), query);
+          for (const [index, query] of command.queries.entries()) {
+            const item = targets?.[index];
             if (!item) {
               missed.push(query);
               continue;
             }
-            found.push(item.name);
             if (command.type === 'check') {
-              await setBought(item.id, true);
+              if (!await setBought(item.id, true)) continue;
             } else {
-              await removeItem(item.id);
+              if (!await removeItem(item.id)) continue;
             }
+            found.push(item.name);
           }
           if (found.length > 0) {
             cue(command.type === 'check' ? 'checked' : 'removed');
@@ -233,15 +241,14 @@ export const ShoppingList = ({
         }
         case 'clearBought':
           cue('removed');
-          await clearBought();
-          toastWithUndo(t('boughtCleared'));
+          { const id = await clearBought(); if (id) toastWithUndo(t('boughtCleared'), id); }
           break;
         case 'undo':
           await performUndo();
           break;
       }
     },
-    [getItems, addAndRefresh, setBought, removeItem, clearBought, performUndo, toastWithUndo, t, lang],
+    [addAndRefresh, setBought, removeItem, clearBought, performUndo, toastWithUndo, t, lang],
   );
 
   const { handleSpeech, choice, choose, contextName } = useConversation({
@@ -250,13 +257,13 @@ export const ShoppingList = ({
 
   const onSpeechError = useCallback(
     (error: string) => {
-      if (error !== 'audio-capture') toast.error(t('micDenied'));
+      toast.error(t(error === 'not-allowed' || error === 'service-not-allowed' ? 'micDenied' : error === 'audio-capture' ? 'micUnavailable' : 'voiceNetworkFailed'), { id: SPEECH_TOAST });
     },
     [t],
   );
 
   const speechLang = LANGUAGES.find((option) => option.lang === lang)?.speech ?? 'ru-RU';
-  const { isListening, toggleListening, stopListening, interimText, isSupported, flushNow } =
+  const { isStarting, isListening, toggleListening, stopListening, interimText, isSupported, flushNow } =
     useSpeechRecognition(handleSpeech, speechLang, onSpeechError);
 
   // Keep the phone awake while dictating in the store.
@@ -273,14 +280,16 @@ export const ShoppingList = ({
 
   const handleImport = useCallback(
     async (parsed: ParsedItem[]) => {
-      setSheet('none');
+      let added = 0;
       for (const item of parsed) {
-        await addAndRefresh(item.name, item.count, item);
+        if (!await addAndRefresh(item.name, item.count, item)) break;
+        added++;
       }
-      if (parsed.length > 0) {
+      if (added > 0) {
         cue('added');
-        toast.success(t('imported', { count: parsed.length }), { id: ITEM_TOAST });
+        toast.success(t('imported', { count: added }), { id: ITEM_TOAST });
       }
+      return parsed.slice(added);
     },
     [addAndRefresh, t],
   );
@@ -291,14 +300,6 @@ export const ShoppingList = ({
     if (shared) openImport(shared);
   }, []);
 
-  // Nothing on screen says "you can just talk to it", so the first visit gets
-  // the instructions once. Afterwards they live behind the ❓ button.
-  useEffect(() => {
-    if (localStorage.getItem(HELP_SEEN_KEY)) return;
-    localStorage.setItem(HELP_SEEN_KEY, '1');
-    setSheet((current) => (current === 'none' ? 'help' : current));
-  }, []);
-
   // Opened from the home-screen "mic" shortcut: start listening right away
   // instead of making them find the button. takeMicIntent answers once, so a
   // re-run of this effect cannot toggle the mic back off.
@@ -306,39 +307,44 @@ export const ShoppingList = ({
     if (isSupported && takeMicIntent()) toggleListening();
   }, [isSupported, toggleListening]);
 
-  const handleManualAdd = (e: React.FormEvent) => {
+  const manualItems = useMemo(() => parseBulkText(newItemName), [newItemName]);
+  const handleManualAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    addAndRefresh(newItemName);
-    setNewItemName('');
+    if (adding || !newItemName.trim()) return;
+    if (manualItems.length !== 1) { openImport(newItemName); return; }
+    const draft = newItemName;
+    setAdding(true);
+    try {
+      const parsed = manualItems[0];
+      const item = await addAndRefresh(parsed.name, parsed.count, parsed);
+      if (item) setNewItemName(current => current === draft ? '' : current);
+    } finally { setAdding(false); }
   };
 
-  const addSuggestion = (name: string) => {
-    addAndRefresh(name);
-    setNewItemName('');
+  const addSuggestion = async (name: string) => {
+    if (await addAndRefresh(name)) setNewItemName('');
   };
 
-  const handleRemove = (id: string) => {
-    const item = items.find((candidate) => candidate.id === id);
-    removeItem(id);
-    if (item) {
-      cue('removed');
-      toastWithUndo(t('removed', { items: item.name }));
-    }
+  const handleRemove = async (id: string) => {
+    const item = items.find(candidate => candidate.id === id);
+    const actionId = await removeItem(id);
+    if (item && actionId) { cue('removed'); toastWithUndo(t('removed', { items: item.name }), actionId); }
+    else toast.error(t('voiceChangeFailed'));
   };
 
-  const handleClearBought = () => {
-    clearBought();
-    toastWithUndo(t('boughtCleared'));
+  const handleClearBought = async () => {
+    const actionId = await clearBought();
+    if (actionId) toastWithUndo(t('boughtCleared'), actionId);
   };
 
-  const handleRestore = (id: string) => {
+  const handleRestore = async (id: string) => {
     const item = deletedItems.find((candidate) => candidate.id === id);
-    restoreDeleted(id);
+    if (!await restoreDeleted(id)) { toast.error(t('voiceChangeFailed')); return; }
     if (item) toast.success(t('restored', { name: item.name }), { id: ITEM_TOAST });
   };
 
-  const handlePurge = () => {
-    purgeDeleted();
+  const handlePurge = async () => {
+    if (!await purgeDeleted()) { toast.error(t('voiceChangeFailed')); return; }
     toast(t('purged'), { icon: '🗑', id: ITEM_TOAST });
   };
 
@@ -453,16 +459,25 @@ export const ShoppingList = ({
         )}
       </div>
 
-      {(isOffline || pendingCount > 0) && (
+      {(isOffline || pendingCount > 0 || failedCount > 0 || loadError || legacyMutations().length > 0) && (
         <p className={styles.offlineBar} role="status">
           {isOffline && <span>📴 {t('offline')}</span>}
           {pendingCount > 0 && <span>⏳ {t('offlineChanges', { count: pendingCount })}</span>}
+          {failedCount > 0 && <span>{t('syncConflicts', { count: failedCount })}</span>}
+          {loadError && <span>{t('loadFailed')}</span>}
+          <button onClick={() => void retrySync()}>{t('retry')}</button>
+          <button onClick={() => setSheet('sync')}>{t('syncDetails')}</button>
         </p>
       )}
 
+      {showIntro && <div className={styles.manualPreview} role="note">
+        <p>{t('quickIntro')}</p>
+        <button onClick={() => { localStorage.setItem(HELP_SEEN_KEY, '1'); setShowIntro(false); }}>{t('gotIt')}</button>
+      </div>}
       <VoiceControls
         isSupported={isSupported}
         isListening={isListening}
+        isStarting={isStarting}
         toggleListening={toggleListening}
         lang={lang}
         setLang={setLang}
@@ -479,8 +494,10 @@ export const ShoppingList = ({
           placeholder={t('addPlaceholder')}
           aria-label={t('addPlaceholder')}
         />
-        <button type="submit">{t('add')}</button>
+        <button type="submit" disabled={adding || !newItemName.trim()}>{adding ? t('saving') : t('add')}</button>
       </form>
+
+      {newItemName.trim() && <p className={styles.manualPreview}>{t('willAdd')}: {manualItems.map(item => `${item.name} · ${formatQuantity(item, lang)}${item.note ? ` · ${item.note}` : ''}`).join(', ')}</p>}
 
       {typeaheadChips.length > 0 && (
         <div className={styles.suggestions}>
@@ -504,7 +521,8 @@ export const ShoppingList = ({
       )}
 
       <div className={`${styles.list} ${dragId ? styles.listDragging : ''}`}>
-        {items.length === 0 && <p className={styles.empty}>{t('emptyList')}</p>}
+        {loading && <p role="status">{t('loading')}</p>}
+        {items.length === 0 && !loading && !loadError && <p className={styles.empty}>{t('emptyList')}</p>}
 
         {activeItems.map((item, index) => (
           <div key={item.id} className={styles.itemSlot}>
@@ -540,6 +558,9 @@ export const ShoppingList = ({
 
         <DeletedDrawer
           items={deletedItems}
+          loading={deletedLoading}
+          error={deletedError}
+          onRetry={() => void retryDeleted()}
           onVisibilityChange={watchDeleted}
           onRestore={handleRestore}
           onPurge={handlePurge}
@@ -580,6 +601,8 @@ export const ShoppingList = ({
       {sheet === 'lists' && (
         <ListsSheet
           lists={lists}
+          loading={catalogLoading}
+          error={catalogError}
           activeList={list}
           viewer={viewer}
           onSelectList={onSelectList}
@@ -587,6 +610,7 @@ export const ShoppingList = ({
           onClose={() => setSheet('none')}
         />
       )}
+      {sheet === 'sync' && <SyncSheet onClose={() => setSheet('none')} onRetry={retrySync} />}
       {sheet === 'help' && <HelpSheet onClose={() => setSheet('none')} />}
       {sheet === 'settings' && (
         <SettingsSheet

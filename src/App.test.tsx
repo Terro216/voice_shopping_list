@@ -42,7 +42,7 @@ beforeEach(() => {
   localStorage.clear();
   localStorage.setItem('username', 'ann');
   localStorage.setItem('token', 'token');
-  // The first visit opens the instructions; this suite is about the list.
+  // The first visit shows an introduction; this suite is about the list.
   localStorage.setItem('help_seen_v1', '1');
 
   vi.stubGlobal(
@@ -181,10 +181,13 @@ describe('App', () => {
     expect(sheet.textContent).not.toContain('⠿');
   });
 
-  it('opens the instructions on the very first visit', async () => {
+  it('offers a short introduction without hiding the first list', async () => {
     localStorage.removeItem('help_seen_v1');
     render(<App />);
-    expect(await screen.findByRole('dialog', { name: 'Как пользоваться' })).toBeTruthy();
+    expect(await screen.findByRole('note')).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Понятно' }));
+    expect(screen.queryByRole('note')).toBeNull();
   });
 
   it('shows the deleted drawer only once it is opened', async () => {

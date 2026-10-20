@@ -11,7 +11,7 @@ import styles from '../App.module.css';
 type Props = {
   item: Item;
   focusNote: boolean;
-  onEdit: (id: string, edit: ItemEdit) => void;
+  onEdit: (id: string, edit: ItemEdit, expected?: Item) => Promise<boolean | undefined>;
   onRemove: (id: string) => void;
   onClose: () => void;
 };
@@ -21,6 +21,8 @@ const normalize = (text: string) => text.trim().replace(/\s+/g, ' ');
 
 export const ItemEditSheet = ({ item, focusNote, onEdit, onRemove, onClose }: Props) => {
   const { lang, t } = useT();
+  const originalItem = useRef({ ...item });
+  const [saveError, setSaveError] = useState(false);
   const original = useRef({ name: item.name, note: item.note ?? '', count: String(item.count), unit: item.unit ?? null });
   const draft = useRef({ ...original.current });
   const [name, setName] = useState(draft.current.name);
@@ -76,39 +78,48 @@ export const ItemEditSheet = ({ item, focusNote, onEdit, onRemove, onClose }: Pr
     if (savingRef.current || closed.current) return;
     savingRef.current = true;
     setSaving(true);
-    await stop();
-    if (closed.current) return;
-    savingRef.current = false;
-    setSaving(false);
-    const nextName = normalize(draft.current.name);
-    const nextNote = normalize(draft.current.note);
-    if (!nextName || nextName.length > MAX_LENGTH) {
-      setInvalidName(true);
-      nameInput.current?.focus();
-      return;
+    setSaveError(false);
+    try {
+      await stop();
+      if (closed.current) return;
+      const nextName = normalize(draft.current.name);
+      const nextNote = normalize(draft.current.note);
+      if (!nextName || nextName.length > MAX_LENGTH) {
+        setInvalidName(true);
+        nameInput.current?.focus();
+        return;
+      }
+      if (nextNote.length > MAX_LENGTH) {
+        noteInput.current?.focus();
+        return;
+      }
+      const nextCount = Number(draft.current.count.replace(',', '.'));
+      const nextUnit = draft.current.unit;
+      if (!isValidQuantity(nextCount, nextUnit)) {
+        setInvalidQuantity(true);
+        countInput.current?.focus();
+        return;
+      }
+      // Editing only the note must not overwrite a collaborator's new name.
+      const edit: ItemEdit = {};
+      if (nextName !== normalize(original.current.name)) edit.name = nextName;
+      if (nextNote !== normalize(original.current.note)) edit.note = nextNote;
+      if (nextCount !== Number(original.current.count) || nextUnit !== original.current.unit) {
+        edit.count = nextCount;
+        edit.unit = nextUnit;
+      }
+      if (Object.keys(edit).length && !await onEdit(item.id, edit, originalItem.current)) {
+        setSaveError(true);
+        return;
+      }
+      closed.current = true;
+      onClose();
+    } catch {
+      if (!closed.current) setSaveError(true);
+    } finally {
+      savingRef.current = false;
+      if (!closed.current) setSaving(false);
     }
-    if (nextNote.length > MAX_LENGTH) {
-      noteInput.current?.focus();
-      return;
-    }
-    const nextCount = Number(draft.current.count.replace(',', '.'));
-    const nextUnit = draft.current.unit;
-    if (!isValidQuantity(nextCount, nextUnit)) {
-      setInvalidQuantity(true);
-      countInput.current?.focus();
-      return;
-    }
-    // Editing only the note must not overwrite a collaborator's new name.
-    const edit: ItemEdit = {};
-    if (nextName !== normalize(original.current.name)) edit.name = nextName;
-    if (nextNote !== normalize(original.current.note)) edit.note = nextNote;
-    if (nextCount !== Number(original.current.count) || nextUnit !== original.current.unit) {
-      edit.count = nextCount;
-      edit.unit = nextUnit;
-    }
-    if (Object.keys(edit).length) onEdit(item.id, edit);
-    closed.current = true;
-    onClose();
   }, [item.id, onEdit, onClose, stop]);
 
   const tooLong = normalize(note).length > MAX_LENGTH;
@@ -162,8 +173,10 @@ export const ItemEditSheet = ({ item, focusNote, onEdit, onRemove, onClose }: Pr
         <p id={hintId} className={styles.sheetHint}>{t(recording ? 'noteListeningHint' : 'noteDictationHint')}</p>
         {tooLong && <p className={styles.error} role="alert">{t('noteTooLong')}</p>}
         {error && <p className={styles.error} role="alert">{t(speechError)}</p>}
+        <p className={styles.sheetHint}>{t('editorCloseHint')}</p>
+        {saveError && <p className={styles.error} role="alert">{t('saveFailed')}</p>}
         <div className={styles.itemEditorActions}>
-          <button type="submit" disabled={saving || tooLong}>{saving ? t('noteFinishing') : t('save')}</button>
+          <button type="submit" disabled={saving || tooLong}>{saving ? t('saving') : t('save')}</button>
           <button type="button" onClick={discard}>{t('cancel')}</button>
           <button type="button" className={styles.removeButton} disabled={saving}
             onClick={() => { discard(); onRemove(item.id); }} aria-label={t('removeItem', { name: item.name })}>

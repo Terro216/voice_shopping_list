@@ -6,6 +6,9 @@ import { formatQuantity } from '../utils/quantity';
 
 type Props = {
   items: Item[];
+  loading?: boolean;
+  error?: boolean;
+  onRetry?: () => void;
   /** Told whenever the drawer opens or closes; open means "keep this fresh". */
   onVisibilityChange: (visible: boolean) => void;
   onRestore: (id: string) => void;
@@ -18,7 +21,7 @@ type Props = {
  * undo toast is gone — so the removed rows stay reachable instead of vanishing.
  * Collapsed by default: it is a safety net, not part of the shopping.
  */
-export const DeletedDrawer = ({ items, onVisibilityChange, onRestore, onPurge }: Props) => {
+export const DeletedDrawer = ({ items, loading, error, onRetry, onVisibilityChange, onRestore, onPurge }: Props) => {
   const { t, lang } = useT();
   const [open, setOpen] = useState(false);
 
@@ -42,9 +45,11 @@ export const DeletedDrawer = ({ items, onVisibilityChange, onRestore, onPurge }:
 
       <p className={styles.sheetHint}>{t('deletedHint')}</p>
 
-      {items.length === 0 ? (
+      {loading && <p role="status">{t('loading')}</p>}
+      {error && <p role="alert">{t('loadFailed')} <button onClick={onRetry}>{t('retry')}</button></p>}
+      {items.length === 0 && !loading && !error ? (
         <p className={styles.deletedEmpty}>{t('deletedEmpty')}</p>
-      ) : (
+      ) : items.length > 0 ? (
         <>
           <ul className={styles.deletedList}>
             {items.map((item) => (
@@ -60,12 +65,12 @@ export const DeletedDrawer = ({ items, onVisibilityChange, onRestore, onPurge }:
             ))}
           </ul>
           <div className={styles.sheetActions}>
-            <button type="button" className={styles.clearBoughtButton} onClick={onPurge}>
+            <button type="button" className={styles.clearBoughtButton} onClick={() => { if (window.confirm(t('purgeConfirm', { count: items.length }))) onPurge(); }}>
               {t('purgeDeleted')}
             </button>
           </div>
         </>
-      )}
+      ) : null}
     </details>
   );
 };

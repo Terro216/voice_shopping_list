@@ -26,7 +26,7 @@ const item: Item = { id: 'milk', list_id: 'weekend', name: 'Молоко', count
 const field = () => screen.getByRole('textbox', { name: 'Заметка: какой именно' }) as HTMLTextAreaElement;
 const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(0); });
 const setup = (value = item) => {
-  const callbacks = { onEdit: vi.fn(), onRemove: vi.fn(), onClose: vi.fn() };
+  const callbacks = { onEdit: vi.fn().mockResolvedValue(true), onRemove: vi.fn(), onClose: vi.fn() };
   const view = render(<ItemEditSheet item={value} focusNote {...callbacks} />);
   return { ...callbacks, ...view };
 };
@@ -66,7 +66,7 @@ describe('note editing and dictation', () => {
     expect(onEdit).not.toHaveBeenCalled();
     act(() => { engine.say('в красной пачке', true); engine.onend?.(); });
     await settle();
-    expect(onEdit).toHaveBeenCalledExactlyOnceWith('milk', { note: 'Безлактозное. в красной пачке' });
+    expect(onEdit).toHaveBeenCalledExactlyOnceWith('milk', { note: 'Безлактозное. в красной пачке' }, expect.objectContaining({ id: 'milk' }));
     expect(onClose).toHaveBeenCalledOnce();
   });
 
@@ -99,7 +99,7 @@ describe('note editing and dictation', () => {
     fireEvent.change(field(), { target: { value: 'Короткая заметка' } });
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
     await settle();
-    expect(onEdit).toHaveBeenCalledExactlyOnceWith('milk', { note: 'Короткая заметка' });
+    expect(onEdit).toHaveBeenCalledExactlyOnceWith('milk', { note: 'Короткая заметка' }, expect.objectContaining({ id: 'milk' }));
   });
 
   it('clears a note and leaves unrelated item fields untouched', async () => {
@@ -107,7 +107,7 @@ describe('note editing and dictation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Очистить заметку' }));
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
     await settle();
-    expect(onEdit).toHaveBeenCalledExactlyOnceWith('milk', { note: '' });
+    expect(onEdit).toHaveBeenCalledExactlyOnceWith('milk', { note: '' }, expect.objectContaining({ id: 'milk' }));
   });
 
   it('allows typing when voice input is unavailable', async () => {
@@ -118,7 +118,7 @@ describe('note editing and dictation', () => {
     fireEvent.change(field(), { target: { value: 'Ручная заметка' } });
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
     await settle();
-    expect(onEdit).toHaveBeenCalledExactlyOnceWith('milk', { note: 'Ручная заметка' });
+    expect(onEdit).toHaveBeenCalledExactlyOnceWith('milk', { note: 'Ручная заметка' }, expect.objectContaining({ id: 'milk' }));
   });
 
   it('keeps the draft on microphone denial and offers typing', () => {
@@ -163,7 +163,7 @@ describe('quantity editor', () => {
     fireEvent.change(screen.getByLabelText('Количество'), { target: { value: '1,25' } });
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
     await settle();
-    expect(onEdit).toHaveBeenCalledExactlyOnceWith('milk', { count: 1.25, unit: 'kg' });
+    expect(onEdit).toHaveBeenCalledExactlyOnceWith('milk', { count: 1.25, unit: 'kg' }, expect.objectContaining({ id: 'milk' }));
   });
 
   it('requires whole pieces and preserves the invalid draft', async () => {
@@ -175,5 +175,21 @@ describe('quantity editor', () => {
     expect(onEdit).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(screen.getByLabelText('Количество'));
+  });
+});
+
+describe('saving failures', () => {
+  it('keeps the draft visible and permits a retry after a rejected save', async () => {
+    const { onEdit, onClose } = setup();
+    onEdit.mockResolvedValueOnce(false);
+    fireEvent.change(field(), { target: { value: 'Новый черновик' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await settle();
+    expect(field().value).toBe('Новый черновик');
+    expect(screen.getByRole('alert').textContent).toContain('Черновик');
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await settle();
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

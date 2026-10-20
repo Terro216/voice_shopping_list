@@ -14,7 +14,8 @@ self.addEventListener('push', (event) => {
       // If the app is focused, the live socket sync already shows the change —
       // a notification would just be noise.
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-      if (windows.some((w) => w.focused)) return;
+      const target = new URL(data.url || '/', self.location.origin);
+      if (windows.some((w) => w.focused && new URL(w.url).searchParams.get('list') === target.searchParams.get('list'))) return;
 
       await self.registration.showNotification(data.title || 'Shopping list', {
         body: data.body || '',

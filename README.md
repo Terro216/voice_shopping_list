@@ -3,6 +3,8 @@
 Shared shopping lists with voice input. React 19 + Vite PWA on the frontend,
 Express 5 + SQLite (better-sqlite3) + Socket.IO on the backend.
 
+[Исправления по ревью](docs/review-fixes.md) · [Предложения по развитию](docs/improvements.md)
+
 ## Features
 
 - **Voice input** (Web Speech API, Russian/English): "добавь молоко и 2 хлеба" →
@@ -41,7 +43,7 @@ Express 5 + SQLite (better-sqlite3) + Socket.IO on the backend.
   it clearly beats the vertical axis, so scrolling a long list never disturbs
   it. Arrow keys on a focused grip do the same reordering without a touchscreen.
   Closing the item editor keeps what was typed — Cancel and Escape discard.
-- **Several named lists**: an account keeps as many as it likes ("Продукты",
+- **Several named lists**: an account keeps up to 50 lists ("Продукты",
   "Дача"), each with its own items, history, members and invite link. The first
   list keeps `id = username`, so links handed out before this existed still work.
 - **Voice commands**: "вычеркни молоко" checks off, "удали хлеб" removes,
@@ -71,13 +73,13 @@ Express 5 + SQLite (better-sqlite3) + Socket.IO on the backend.
   "Удалённое" drawer at the bottom of the screen, where it stays for 30 days and
   can be put back with one tap. "Clear bought" goes there too.
 - **Instructions**: a ❓ sheet explains voice, commands, gestures, lists,
-  sharing and offline use; it opens by itself on the first visit and afterwards
-  lives behind the button (and in ⚙️ Settings).
+  sharing and offline use. The first visit shows a short inline introduction;
+  the full guide lives behind the Help button (and in ⚙️ Settings).
 - **Bought state**: tap an item to check it off — it sinks to the bottom with a
   strikethrough, most recently checked first; "Clear bought" wipes the cart
   after checkout. The screen stays awake (Wake Lock) while the mic is listening.
-- **Editing and notes**: tap the note below an item or "Add a note" to open a
-  large text field; ⋯ opens the same editor for the name, quantity and unit. Dictation appends plain
+- **Editing and notes**: tap an existing note to open a large text field; use ⋯ to add a note
+  or open the same editor for the name, quantity and unit. Dictation appends plain
   text to the note, without interpreting shopping commands. Finish dictation to
   correct the text, clear it, or save; saving waits for the final speech result.
   Notes stay within 200 characters, with an explicit overflow message instead
@@ -110,7 +112,8 @@ Express 5 + SQLite (better-sqlite3) + Socket.IO on the backend.
   15 seconds while the page is visible, with no persistent snapshots, editing,
   history, trash, voice input or offline mutation replay.
 - **Web Push**: the 🔔 bell subscribes a device to a list — others' changes
-  arrive as a batched notification (silent when the app is focused). Requires
+  arrive as a batched notification (silent when that list is focused). A device
+  can subscribe to several lists independently. Requires
   VAPID keys in `.env`; the bell hides itself when unconfigured.
 - **Offline-first PWA**: the list is cached locally so it opens with no signal,
   and mutations made offline are queued and replayed (in order, with a fresh
@@ -121,6 +124,8 @@ Express 5 + SQLite (better-sqlite3) + Socket.IO on the backend.
   light/dark/system theme switch.
 - **Auth**: username/password (bcrypt), JWT valid for 30 days and silently
   renewed on use, so an app that gets opened never expires under the user.
+  Tokens are bound to an immutable user id and a session version. Changing
+  the password revokes old tokens; deleting an account revokes its identity.
   Password changes and account deletion live in ⚙️ Settings.
 
 ## Project layout
@@ -166,10 +171,10 @@ was named accordingly until migration 007 renamed the columns to `list_id` and
 the API parameter to `list`. An account's first list still has `id = username`,
 which is what let invite links handed out before lists had names keep working.
 
-The API also still answers to `username` as a name for the `list` parameter, and
-snapshots stored under the old shape are read back. Both exist for one reason:
-a phone that queued mutations offline before the rename — or updated while in a
-shop with no signal — has to be able to replay them and open onto its list.
+The API still accepts `username` as an alias for the `list` parameter. New local
+state is scoped to immutable account ids. Unowned legacy queues are retained for
+explicit recovery and never replayed under an arbitrary account. See the upgrade
+and rollback notes in [review fixes](docs/review-fixes.md).
 
 ## Development
 

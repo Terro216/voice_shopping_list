@@ -1,5 +1,5 @@
-import { request, ApiError, NetworkError } from './client';
-import { enqueueMutation, queuedMutationCount } from './offlineQueue';
+import { request } from './client';
+import { submitMutation as sendOrQueue } from './offlineQueue';
 import type { Unit } from '../../shared/quantity.js';
 
 export type Item = {
@@ -21,6 +21,7 @@ export type Item = {
 
 /** Fields of an item that can be edited; omitting one leaves it untouched. */
 export type ItemEdit = {
+  bought?: boolean;
   name?: string;
   note?: string | null;
   count?: number;
@@ -42,28 +43,6 @@ export const generateItemId = () =>
   typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-
-/**
- * Mutations are optimistic-friendly: when the network is down (or the request
- * dies in transit) they land in the offline queue instead of failing. An HTTP
- * error is a real answer from the server and is thrown to the caller.
- */
-const sendOrQueue = async <T = void>(url: string, method: string, body?: unknown): Promise<T | undefined> => {
-  if (!navigator.onLine || queuedMutationCount() > 0) {
-    enqueueMutation({ url, method, body });
-    return;
-  }
-  try {
-    return await request<T>(url, { method, body });
-  } catch (err) {
-    if (err instanceof ApiError) throw err;
-    if (err instanceof NetworkError) {
-      enqueueMutation({ url, method, body });
-      return;
-    }
-    throw err;
-  }
-};
 
 export const fetchItems = (list: string): Promise<Item[]> =>
   request<Item[]>(`/api/items?list=${encodeURIComponent(list)}`);
@@ -89,16 +68,17 @@ export const updateItem = (id: string, list: string, edit: ItemEdit, expected?: 
 export const moveItem = (id: string, list: string, destination: string, expected?: ItemExpectation) =>
   sendOrQueue<Item>(`/api/items/${encodeURIComponent(id)}/move`, 'POST', { list, destination, ...(expected ? { expected } : {}) });
 
-export const setItemBought = (id: string, list: string, bought: boolean): Promise<void> =>
-  sendOrQueue(`/api/items/${encodeURIComponent(id)}/bought`, 'PATCH', { list, bought });
+export const setItemBought = (id: string, list: string, bought: boolean, expected?: ItemExpectation): Promise<void> =>
+  sendOrQueue(`/api/items/${encodeURIComponent(id)}/bought`, 'PATCH', { list, bought, ...(expected ? { expected } : {}) });
 
-export const clearBoughtItems = (list: string): Promise<void> =>
-  sendOrQueue(`/api/items/bought?list=${encodeURIComponent(list)}`, 'DELETE');
+export const clearBoughtItems = (list: string, ids: string[]): Promise<void> =>
+  sendOrQueue(`/api/items/bought?list=${encodeURIComponent(list)}`, 'DELETE', { ids });
 
-export const deleteItem = (id: string, list: string): Promise<void> =>
+export const deleteItem = (id: string, list: string, expected?: ItemExpectation): Promise<void> =>
   sendOrQueue(
     `/api/items/${encodeURIComponent(id)}?list=${encodeURIComponent(list)}`,
     'DELETE',
+    expected ? { expected } : undefined,
   );
 
 /** Items in the list's "deleted" drawer, most recently removed first. */
@@ -108,8 +88,8 @@ export const fetchDeletedItems = (list: string): Promise<Item[]> =>
 export const restoreItem = (id: string, list: string): Promise<void> =>
   sendOrQueue(`/api/items/${encodeURIComponent(id)}/restore`, 'POST', { list });
 
-export const purgeDeletedItems = (list: string): Promise<void> =>
-  sendOrQueue(`/api/items/deleted?list=${encodeURIComponent(list)}`, 'DELETE');
+export const purgeDeletedItems = (list: string, ids: string[]): Promise<void> =>
+  sendOrQueue(`/api/items/deleted?list=${encodeURIComponent(list)}`, 'DELETE', { ids });
 
 /**
  * Rewrites the manual order. The whole visible order is sent, not a move, so a

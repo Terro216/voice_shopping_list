@@ -3,6 +3,7 @@ import { Item, ItemEdit } from '../api/items';
 import { haptic } from '../utils/feedback';
 import { useT } from '../i18n';
 import styles from '../App.module.css';
+import { quantityStep } from '../../shared/quantity.js';
 import { formatQuantity } from '../utils/quantity';
 import { ItemEditSheet } from './ItemEditSheet';
 
@@ -11,7 +12,7 @@ type Props = {
   onToggleBought: (id: string) => void;
   onIncrement: (id: string) => void;
   onDecrement: (id: string) => void;
-  onEdit: (id: string, edit: ItemEdit) => void;
+  onEdit: (id: string, edit: ItemEdit, expected?: Item) => Promise<boolean | undefined>;
   onRemove: (id: string) => void;
   onEditorOpen?: () => void;
   /** Present only where reordering makes sense (the active part of the list). */
@@ -77,6 +78,7 @@ export const ItemRow = ({
   const [swipe, setSwipe] = useState(0);
   const [settling, setSettling] = useState(false);
 
+  const suppressClickUntil = useRef(0);
   const gesture = useRef({ id: -1, x0: 0, y0: 0, axis: null as Axis, width: 1, armed: false });
 
   const closeEditor = useCallback(() => setEditing(false), []);
@@ -101,7 +103,7 @@ export const ItemRow = ({
     if (editing || isDragging) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     // Buttons, inputs and the drag grip own their own gestures.
-    if ((e.target as HTMLElement).closest('button, input, [data-no-swipe]')) return;
+    if ((e.target as HTMLElement).closest('button:not([data-swipe-main]), input, [data-no-swipe]')) return;
 
     gesture.current = {
       id: e.pointerId,
@@ -153,6 +155,7 @@ export const ItemRow = ({
     const dx = e.clientX - g.x0;
     const committed = g.axis === 'x' && Math.abs(dx) >= commitThreshold();
 
+    if (g.axis === 'x') suppressClickUntil.current = Date.now() + 400;
     endSwipe();
     if (!committed) return;
     if (dx > 0) onToggleBought(item.id);
@@ -194,6 +197,7 @@ export const ItemRow = ({
       <div
         className={`${styles.itemSurface} ${settling ? styles.itemSettling : ''}`}
         style={rowStyle}
+        onClickCapture={(event) => { if (Date.now() < suppressClickUntil.current) { event.preventDefault(); event.stopPropagation(); } }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -222,6 +226,9 @@ export const ItemRow = ({
           <button
             type="button"
             className={styles.itemMain}
+            data-swipe-main=""
+            role="checkbox"
+            aria-checked={item.bought}
             onClick={() => onToggleBought(item.id)}
             aria-label={
               item.bought ? t('returnToList', { name: item.name }) : t('markBought', { name: item.name })
@@ -242,7 +249,7 @@ export const ItemRow = ({
                 <button
                   className={styles.stepButton}
                   onClick={() => onDecrement(item.id)}
-                  aria-label={t(item.unit ? 'decreaseQuantity' : 'oneLess', { name: item.name })}
+                  aria-label={t(item.count <= quantityStep(item.unit) ? 'removeItem' : item.unit ? 'decreaseQuantity' : 'oneLess', { name: item.name })}
                 >
                   −
                 </button>
@@ -260,7 +267,7 @@ export const ItemRow = ({
             <button
               className={styles.stepButton}
               onClick={() => openEditor()}
-              aria-label={t('edit')}
+              aria-label={t('editItemNamed', { name: item.name })}
               aria-expanded={editing}
             >
               ⋯
@@ -268,11 +275,11 @@ export const ItemRow = ({
           </div>
         </div>
 
-        <button type="button" className={styles.noteLink}
+        {item.note && <button type="button" className={styles.noteLink}
           onClick={() => openEditor(true)}
           aria-label={t(item.note ? 'editNoteFor' : 'addNoteFor', { name: item.name })}>
-          <span aria-hidden="true">{item.note ? '✎' : '+'}</span> {item.note || t('addNote')}
-        </button>
+          <span aria-hidden="true">{item.note ? '✎' : '+'}</span> {item.note}
+        </button>}
       </div>
     </div>
     {editing && (

@@ -37,14 +37,15 @@ export const PushToggle = ({ list, listName }: Props) => {
       if (!pushSupported()) return;
       try {
         const { key } = await getPushPublicKey();
-        const registration = await navigator.serviceWorker.getRegistration();
-        if (!key || !registration || stale) return;
+        if (!key || stale) return;
+        const registration = await navigator.serviceWorker.ready;
+        if (stale) return;
         publicKeyRef.current = key;
 
         const subscription = await registration.pushManager.getSubscription();
         if (subscription) {
-          const { list: subscribedTo } = await getPushStatus(subscription.endpoint);
-          if (!stale) setState(subscribedTo === list ? 'on' : 'off');
+          const { lists: subscribedTo } = await getPushStatus(subscription.endpoint);
+          if (!stale) setState(subscribedTo.includes(list) ? 'on' : 'off');
         } else if (!stale) {
           setState('off');
         }
@@ -90,12 +91,12 @@ export const PushToggle = ({ list, listName }: Props) => {
       const registration = await navigator.serviceWorker.getRegistration();
       const subscription = await registration?.pushManager.getSubscription();
       if (subscription) {
-        await removePushSubscription(subscription.endpoint).catch(() => {});
-        await subscription.unsubscribe();
+        await removePushSubscription(subscription.endpoint, list);
       }
       setState('off');
       toast(t('notificationsOff'), { icon: '🔕' });
     } catch {
+      toast.error(t('notificationsFailed'));
       setState('on');
     }
   };

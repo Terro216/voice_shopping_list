@@ -1,5 +1,6 @@
 // End-to-end smoke test: boots the real server on a test port with an isolated
 // database and exercises the auth + items API. Run: npm run smoke
+import { randomUUID } from 'node:crypto';
 import { spawn } from 'child_process';
 import { mkdirSync, readFileSync, readdirSync, rmSync } from 'fs';
 import Database from 'better-sqlite3';
@@ -16,12 +17,13 @@ const check = (label, cond, extra = '') => {
   if (!cond) failures++;
 };
 
-const api = async (path, { method = 'GET', body, token } = {}) => {
+const api = async (path, { method = 'GET', body, token, mutationId } = {}) => {
   const res = await fetch(BASE + path, {
     method,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(mutationId ? { 'X-Mutation-Id': mutationId } : {}),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -47,9 +49,11 @@ for (const file of readdirSync('server/db/migrations').filter(file => file.endsW
 fixture.prepare('INSERT INTO items (id, name, note, count, list_id, bought) VALUES (?, ?, ?, ?, ?, ?)')
   .run('legacy-fixture', 'Legacy item', 'Keep this note', 3, 'migration-fixture', 1);
 const previousIndexes = fixture.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'items' ORDER BY name").all();
+fixture.prepare('INSERT INTO push_subscriptions (endpoint, subscriber, list_id, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+  .run('https://example.invalid/migration', 'migration-fixture', 'migration-fixture', 'fixture-key', 'fixture-auth', '2025-01-01 00:00:00');
 fixture.close();
 const server = spawn('node', ['server/index.js'], {
-  env: { ...process.env, PORT: String(PORT), NODE_ENV: '', DATA_DIR: dataDir },
+  env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', NODE_ENV: '', DATA_DIR: dataDir, JWT_SECRET: randomUUID(), VAPID_PUBLIC_KEY: '', VAPID_PRIVATE_KEY: '' },
   stdio: ['ignore', 'pipe', 'inherit'],
 });
 
@@ -71,6 +75,8 @@ try {
   check('unit migration preserves legacy item fields', JSON.stringify(legacy) === JSON.stringify({ name: 'Legacy item', note: 'Keep this note', count: 3, unit: null, bought: 1 }));
   check('unit migration preserves item indexes', JSON.stringify(previousIndexes) === JSON.stringify(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'items' ORDER BY name").all()));
   check('migrated database integrity', migrated.pragma('integrity_check', { simple: true }) === 'ok');
+  const migratedPush = migrated.prepare('SELECT * FROM push_subscriptions WHERE endpoint = ?').get('https://example.invalid/migration');
+  check('push migration preserves subscription fields and creation date', migratedPush.p256dh === 'fixture-key' && migratedPush.created_at === '2025-01-01 00:00:00');
   migrated.close();
   let r = await api('/api/auth/register', { method: 'POST', body: { username: user, password: 'password123' } });
   check('register → 201 + token', r.status === 201 && !!r.data.token, JSON.stringify(r));
@@ -262,7 +268,7 @@ try {
   // ---- access control: knowing a list name is not access ----
   const other = `${user}_b`;
   r = await api('/api/auth/register', { method: 'POST', body: { username: other, password: 'password123' } });
-  const otherToken = r.data.token;
+  let otherToken = r.data.token;
   check('second account registered', r.status === 201 && !!otherToken, JSON.stringify(r));
 
   r = await api(`/api/items?list=${user}`, { token: otherToken });
@@ -626,28 +632,59 @@ try {
     strangerSocket.socket.close();
   }
 
+  // Receipts commit atomically with the operation: ambiguous delivery is safe.
+  const replayBody = { list: user, delta: 1 };
+  await api('/api/items', { method: 'POST', token, body: { id: 'receipt-item', name: 'receipt fixture', count: 1, list: user } });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    r = await api('/api/items/receipt-item/count', { method: 'PATCH', token, body: replayBody, mutationId: 'count-receipt-001' });
+    check(`same mutation replay ${attempt + 1}`, r.status === 200);
+  }
+  r = await api(`/api/items?list=${user}`, { token });
+  check('three deliveries apply delta once', r.data.find(item => item.id === 'receipt-item')?.count === 2);
+  r = await api('/api/items/receipt-item/count', { method: 'PATCH', token, body: { ...replayBody, delta: 2 }, mutationId: 'count-receipt-001' });
+  check('mutation id cannot be reused for different content', r.status === 409);
+  for (const id of ['clear-seen', 'clear-unseen']) await api('/api/items', { method: 'POST', token, body: { id, name: id, bought: true, list: user } });
+  await api(`/api/items/bought?list=${user}`, { method: 'DELETE', token, body: { ids: ['clear-seen'] }, mutationId: 'clear-receipt-001' });
+  r = await api(`/api/items?list=${user}`, { token });
+  check('clear bought only affects captured ids', r.data.some(item => item.id === 'clear-unseen') && !r.data.some(item => item.id === 'clear-seen'));
+  await api(`/api/items/clear-unseen?list=${user}`, { method: 'DELETE', token });
+  await api(`/api/items/deleted?list=${user}`, { method: 'DELETE', token, body: { ids: ['clear-seen'] }, mutationId: 'purge-receipt-001' });
+  r = await api(`/api/items/deleted?list=${user}`, { token });
+  check('purge only affects displayed captured ids', r.data.some(item => item.id === 'clear-unseen') && !r.data.some(item => item.id === 'clear-seen'));
+
   // ---- password change ----
   r = await api('/api/auth/password', { method: 'POST', token: otherToken, body: { currentPassword: 'wrong', newPassword: 'newpassword1' } });
-  check('password change with wrong current → 401', r.status === 401, JSON.stringify(r));
+  check('wrong current password is a form error → 400', r.status === 400, JSON.stringify(r));
 
   r = await api('/api/auth/password', { method: 'POST', token: otherToken, body: { currentPassword: 'password123', newPassword: 'short' } });
   check('password change to a short one → 400', r.status === 400, JSON.stringify(r));
 
   r = await api('/api/auth/password', { method: 'POST', token: otherToken, body: { currentPassword: 'password123', newPassword: 'newpassword1' } });
   check('password changed → 200 + token', r.status === 200 && !!r.data.token, JSON.stringify(r));
+  const previousToken = otherToken;
+  otherToken = r.data.token;
+  r = await api('/api/lists', { token: previousToken });
+  check('password change revokes previous token', r.status === 401);
 
   r = await api('/api/auth/login', { method: 'POST', body: { username: other, password: 'newpassword1' } });
   check('login with the new password → 200', r.status === 200, JSON.stringify(r));
 
   // ---- account deletion ----
   r = await api('/api/auth/account', { method: 'DELETE', token: otherToken, body: { password: 'password123' } });
-  check('delete account with the old password → 401', r.status === 401, JSON.stringify(r));
+  check('wrong password does not expire the session → 400', r.status === 400, JSON.stringify(r));
 
   r = await api('/api/auth/account', { method: 'DELETE', token: otherToken, body: { password: 'newpassword1' } });
   check('account deleted → 200', r.status === 200, JSON.stringify(r));
 
   r = await api('/api/auth/login', { method: 'POST', body: { username: other, password: 'newpassword1' } });
   check('deleted account can no longer log in → 401', r.status === 401, JSON.stringify(r));
+  r = await api('/api/lists', { token: otherToken });
+  check('deleted account token rejected', r.status === 401);
+  r = await api('/api/auth/register', { method: 'POST', body: { username: other, password: 'replacement123' } });
+  check('same name can register as a new identity', r.status === 201);
+  r = await api(`/api/items?list=${other}`, { token: otherToken });
+  check('deleted token cannot read replacement account', r.status === 401);
+
 } finally {
   server.kill('SIGTERM');
   await sleep(500);

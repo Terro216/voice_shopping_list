@@ -4,9 +4,9 @@ import { fileURLToPath } from "url";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import helmet from "helmet";
-import jwt from "jsonwebtoken";
+import { authenticateToken } from "./middleware/auth.js";
 import { config } from "./config.js";
-import { closeDb } from "./db/index.js";
+import db, { closeDb } from "./db/index.js";
 import { hasListAccess } from "./lists.js";
 import { authLimiter } from "./middleware/rateLimits.js";
 import itemsRouter from "./routes/items.js";
@@ -52,7 +52,7 @@ app.use(
       : false, // Vite dev serves its own pages; CSP here would only get in the way
   }),
 );
-app.use(express.json({ limit: "10kb" }));
+app.use(express.json({ limit: "64kb" }));
 
 // Sockets carry the same JWT as the REST calls: the name shown in presence and
 // the rooms a client may join both come from the token, not from what the
@@ -61,7 +61,10 @@ io.use((socket, next) => {
   const token = socket.handshake.auth?.token;
   if (typeof token !== "string" || !token) return next(new Error("unauthorized"));
   try {
-    socket.data.user = jwt.verify(token, config.jwtSecret).username;
+    const payload = authenticateToken(token);
+    socket.data.user = payload.username;
+    socket.data.userId = payload.sub;
+    socket.data.token = token;
     next();
   } catch {
     next(new Error("unauthorized"));
@@ -84,7 +87,12 @@ const announcePresence = (list) => {
 };
 
 io.on("connection", (socket) => {
+  socket.join(`user_${socket.data.user}`);
+  const expiry = Math.max(1, authenticateToken(socket.data.token).exp * 1000 - Date.now());
+  const expiryTimer = setTimeout(() => socket.disconnect(true), Math.min(expiry, 2147483647));
+  expiryTimer.unref();
   socket.on("join_list", (payload) => {
+    try { authenticateToken(socket.data.token); } catch { socket.disconnect(true); return; }
     const list = typeof payload === "string" ? payload : payload?.list;
     if (typeof list !== "string" || list.length === 0 || list.length > 64) return;
     if (!hasListAccess(socket.data.user, list)) return;
@@ -101,11 +109,12 @@ io.on("connection", (socket) => {
     announcePresence(list);
   });
 
-  socket.on("disconnect", () => announcePresence(socket.data.list));
+  socket.on("disconnect", () => { clearTimeout(expiryTimer); announcePresence(socket.data.list); });
 });
 
 // Only the unauthenticated auth endpoints are limited by IP; everything behind
 // a token is limited per account inside its own router (see rateLimits.js).
+app.get("/api/health", (_req, res) => { db.prepare("SELECT 1").get(); res.json({ ready: true }); });
 app.use("/api/auth", authLimiter, authRouter);
 app.use("/api/guest", guestRouter);
 app.use("/api/items", itemsRouter);
@@ -133,7 +142,7 @@ app.use((err, req, res, _next) => {
   res.status(status).json({ error: status >= 500 ? "Internal server error" : err.message });
 });
 
-server.listen(config.port, () => {
+server.listen(config.port, process.env.HOST || "0.0.0.0", () => {
   console.log(`Server listening on port ${config.port}`);
 });
 

@@ -26,6 +26,8 @@ import {
   rotateShareToken,
 } from "../lists.js";
 
+import { notifyCatalog, revokeRoom } from "../realtime.js";
+
 const router = express.Router();
 
 router.use(verifyToken);
@@ -61,6 +63,7 @@ router.post("/", writeLimiter, (req, res) => {
     return res.status(409).json({ error: `A single account may keep ${MAX_LISTS_PER_OWNER} lists` });
   }
 
+  notifyCatalog(req, list.id);
   res.status(201).json({ ...list, members: [] });
 });
 
@@ -97,6 +100,7 @@ router.post("/join", writeLimiter, (req, res) => {
   if (!list) return res.status(404).json({ error: "This invite link is no longer valid" });
 
   grantAccess(list, req.user.username);
+  notifyCatalog(req, list);
   res.json({ list, name: getList(list)?.name ?? list });
 });
 
@@ -108,6 +112,8 @@ router.post("/leave", writeLimiter, (req, res) => {
   }
 
   revokeAccess(list, req.user.username);
+  revokeRoom(req, list, req.user.username);
+  notifyCatalog(req, list, [req.user.username]);
   res.json({ success: true });
 });
 
@@ -122,6 +128,8 @@ router.delete("/members", writeLimiter, (req, res) => {
   }
 
   revokeAccess(list, member);
+  revokeRoom(req, list, member);
+  notifyCatalog(req, list, [member]);
   res.json({ success: true });
 });
 
@@ -149,6 +157,7 @@ router.patch("/:id", writeLimiter, (req, res) => {
   // A list that predates the `lists` table has no row to update yet.
   if (!getList(id)) ensureUserList(req.user.username);
   renameList(id, name);
+  notifyCatalog(req, id);
   res.json({ id, name, owner: req.user.username, owned: true });
 });
 
@@ -165,6 +174,8 @@ router.delete("/:id", writeLimiter, (req, res) => {
       return res.status(403).json({ error: "No access to this list" });
     }
     revokeAccess(id, req.user.username);
+    revokeRoom(req, id, req.user.username);
+    notifyCatalog(req, id, [req.user.username]);
     return res.json({ success: true, left: true });
   }
 
@@ -172,6 +183,8 @@ router.delete("/:id", writeLimiter, (req, res) => {
     return res.status(400).json({ error: "Your main list cannot be deleted" });
   }
 
+  notifyCatalog(req, id);
+  revokeRoom(req, id);
   deleteList(id);
   res.json({ success: true, deleted: true });
 });

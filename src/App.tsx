@@ -3,9 +3,11 @@ import { Toaster, ToastBar, toast, useToasterStore } from 'react-hot-toast';
 import { Login } from './components/Login';
 import { ShoppingList } from './components/ShoppingList';
 import { GuestList } from './components/GuestList';
-import { ApiError, AUTH_EXPIRED_EVENT, RATE_LIMITED_EVENT } from './api/client';
+import { ApiError, AUTH_EXPIRED_EVENT, RATE_LIMITED_EVENT, CATALOG_CHANGED_EVENT, SESSION_CHANGED_EVENT, sessionKey, getAccountId, announceSessionChange } from './api/client';
 import { fetchLists, joinList, type ListSummary } from './api/lists';
 import { clearSnapshots } from './api/listCache';
+import { readCatalog, writeCatalog, clearCatalog } from './api/catalogCache';
+import { queuedMutationCount } from './api/offlineQueue';
 import { clearUndoStacks } from './api/undoStack';
 import { useTheme } from './hooks/useTheme';
 import { watchForUpdates } from './pwa';
@@ -66,7 +68,8 @@ const Notifications = () => {
           className={styles.toastShell}
           onClick={() => toast.dismiss(entry.id)}
           role="button"
-          tabIndex={-1}
+          tabIndex={0}
+          onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) toast.dismiss(entry.id); }}
         >
           <ToastBar toast={entry} />
         </div>
@@ -79,8 +82,11 @@ function App() {
   const [session, setSession] = useState<Session | null>(readStoredSession);
   const [lang, setLangState] = useState<Lang>(readStoredLang);
   const { theme, setTheme } = useTheme();
-  const [lists, setLists] = useState<ListSummary[]>([]);
-  const [activeList, setActiveList] = useState<string | null>(readListParam);
+  const [lists, setLists] = useState<ListSummary[]>(readCatalog);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState(false);
+  const catalogRequest = useRef(0);
+  const [activeList, setActiveList] = useState<string | null>(() => readListParam() ?? localStorage.getItem(`last_list:${getAccountId()}`));
   const [authMode, setAuthMode] = useState<'login' | 'register' | null>(null);
   const invite = new URLSearchParams(window.location.search).get('join');
 
@@ -93,22 +99,27 @@ function App() {
   }, []);
 
   const handleLogin = (username: string, token: string) => {
+    localStorage.setItem('session_generation', crypto.randomUUID());
     localStorage.setItem('username', username);
     localStorage.setItem('token', token);
     // Deliberately keep the query string: someone opening a share link must
     // land on that list after logging in, not on their own.
+    setLists(readCatalog());
     setSession({ username, token });
+    announceSessionChange();
     setAuthMode(null);
   };
 
   const handleLogout = useCallback((preserveInvite = false) => {
-    localStorage.removeItem('username');
-    localStorage.removeItem('token');
+
     // The cached lists are somebody's shopping habits — they should not sit in
     // storage for whoever logs in on this device next. Same for the undo stacks,
     // which quote item names.
-    clearSnapshots();
-    clearUndoStacks();
+    if (!preserveInvite && queuedMutationCount() === 0) { clearSnapshots(); clearUndoStacks(); clearCatalog(); }
+    localStorage.setItem('session_generation', crypto.randomUUID());
+    localStorage.removeItem('username');
+    localStorage.removeItem('token');
+    announceSessionChange();
     setSession(null);
     setLists([]);
     setActiveList(null);
@@ -120,10 +131,44 @@ function App() {
   // its next step — creating a list and opening it — can wait for it.
   const refreshLists = useCallback(() => {
     if (!session) return Promise.resolve();
+    const requestedSession = sessionKey();
+    const requestId = ++catalogRequest.current;
+    setCatalogLoading(true);
     return fetchLists()
-      .then(setLists)
-      .catch(() => setLists([]));
+      .then((data) => {
+        if (sessionKey() !== requestedSession || requestId !== catalogRequest.current) return;
+        setLists(data);
+        writeCatalog(data);
+        setCatalogError(false);
+      })
+      .catch(() => { if (sessionKey() === requestedSession && requestId === catalogRequest.current) setCatalogError(true); })
+      .finally(() => { if (requestId === catalogRequest.current) setCatalogLoading(false); });
   }, [session]);
+
+  useEffect(() => {
+    const refresh = () => { void refreshLists(); };
+    const changed = () => {
+      const next = readStoredSession();
+      setSession(current => current?.username === next?.username && current?.token === next?.token ? current : next);
+      setLists(readCatalog());
+      if (next?.username !== session?.username) setActiveList(localStorage.getItem(`last_list:${getAccountId()}`));
+    };
+    const storage = (event: StorageEvent) => {
+      if (event.key === 'token' || event.key === 'username' || event.key === 'session_generation') changed();
+    };
+    window.addEventListener('storage', storage);
+    window.addEventListener(CATALOG_CHANGED_EVENT, refresh);
+    window.addEventListener(SESSION_CHANGED_EVENT, changed);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
+    return () => {
+      window.removeEventListener('storage', storage);
+      window.removeEventListener(CATALOG_CHANGED_EVENT, refresh);
+      window.removeEventListener(SESSION_CHANGED_EVENT, changed);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('online', refresh);
+    };
+  }, [refreshLists, session?.username]);
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -206,10 +251,15 @@ function App() {
     (list: string) => {
       const next = session && list === session.username ? null : list;
       setActiveList(next);
-      writeListParam(next);
+      localStorage.setItem(`last_list:${getAccountId()}`, list);
+      writeListParam(list);
     },
     [session],
   );
+
+  useEffect(() => {
+    if (session && invite === null) writeListParam(activeList || session.username);
+  }, [session, activeList, invite]);
 
   if (!session) {
     return (
@@ -237,10 +287,12 @@ function App() {
       <div className={styles.appWrapper}>
         <Notifications />
         <ShoppingList
-          key={currentList}
+          key={`${sessionKey()}:${currentList}`}
           list={currentList}
           viewer={session.username}
           lists={lists}
+          catalogLoading={catalogLoading}
+          catalogError={catalogError}
           onSelectList={selectList}
           onListsChanged={refreshLists}
           lang={lang}

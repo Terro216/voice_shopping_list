@@ -21,6 +21,7 @@ const item = (id: string, over: Partial<Item> = {}): Item => ({
 });
 
 let served: Item[] = [];
+let deleted: Item[] = [];
 let calls: { url: string; method: string; body: unknown }[] = [];
 
 const respond = (url: string, init?: RequestInit) => {
@@ -31,10 +32,22 @@ const respond = (url: string, init?: RequestInit) => {
   });
   const path = new URL(url, 'http://localhost').pathname;
   const reading = !init?.method || init.method === 'GET';
+  if (!reading) {
+    const body = init?.body ? JSON.parse(String(init.body)) : {};
+    const id = decodeURIComponent(path.split('/')[3] ?? '');
+    if (init?.method === 'POST' && path === '/api/items') served = [...served.filter(item => item.id !== body.id), { ...body, list_id: body.list }];
+    else if (init?.method === 'DELETE') { deleted.push(...served.filter(item => item.id === id)); served = served.filter(item => item.id !== id); }
+    else if (init?.method === 'PATCH') {
+      deleted.push(...served.filter(item => item.id === id && typeof body.delta === 'number' && item.count + body.delta <= 0));
+      served = served.map(item => item.id !== id ? item : path.endsWith('/count')
+      ? { ...item, count: Math.round((item.count + body.delta) * 1000) / 1000 }
+      : { ...item, ...body }).filter(item => item.count > 0);
+    }
+  }
   const data = reading
     ? path === '/api/items'
       ? served
-      : [] // suggestions and the deleted drawer
+      : path === '/api/items/deleted' ? deleted : []
     : { ok: true };
   return { ok: true, status: 200, headers: new Headers(), json: async () => data };
 };
@@ -44,6 +57,7 @@ const sent = (method: string, match: string) =>
 
 beforeEach(() => {
   served = [];
+  deleted = [];
   calls = [];
   localStorage.clear();
   vi.stubGlobal('fetch', vi.fn(respond));

@@ -4,13 +4,13 @@ export const getPushPublicKey = () =>
   request<{ key: string | null }>('/api/push/public-key', { auth: false });
 
 export const getPushStatus = (endpoint: string) =>
-  request<{ list: string | null }>(`/api/push/status?endpoint=${encodeURIComponent(endpoint)}`);
+  request<{ list: string | null; lists: string[] }>(`/api/push/status?endpoint=${encodeURIComponent(endpoint)}`);
 
 export const savePushSubscription = (subscription: PushSubscriptionJSON, list: string) =>
   request('/api/push/subscribe', { method: 'POST', body: { subscription, list } });
 
-export const removePushSubscription = (endpoint: string) =>
-  request('/api/push/subscribe', { method: 'DELETE', body: { endpoint } });
+export const removePushSubscription = (endpoint: string, list: string) =>
+  request('/api/push/subscribe', { method: 'DELETE', body: { endpoint, list } });
 
 // applicationServerKey wants raw bytes, VAPID keys travel as URL-safe base64.
 export const urlBase64ToUint8Array = (base64String: string): Uint8Array => {

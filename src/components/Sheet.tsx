@@ -19,6 +19,20 @@ export const Sheet = ({ title, onClose, onEscape, initialFocusRef, children }: P
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const siblings: HTMLElement[] = [];
+    let branch: HTMLElement | null = panelRef.current?.parentElement ?? null;
+    while (branch?.parentElement && branch.parentElement !== document.body) {
+      for (const sibling of branch.parentElement.children) {
+        if (sibling !== branch && sibling instanceof HTMLElement && !sibling.inert) { sibling.inert = true; siblings.push(sibling); }
+      }
+      branch = branch.parentElement;
+    }
+    return () => { document.body.style.overflow = previous; siblings.forEach(node => { node.inert = false; }); };
+  }, []);
+
+  useEffect(() => {
     const panel = panelRef.current;
     // Whatever opened the sheet gets the focus back when it closes, so a
     // keyboard or screen-reader user is not dumped at the top of the page.

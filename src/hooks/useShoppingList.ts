@@ -20,7 +20,7 @@ import {
   itemExpectation,
   type ItemExpectation,
 } from '../api/items';
-import { readSnapshot, writeSnapshot } from '../api/listCache';
+import { readSnapshot, writeSnapshot, removeSnapshot } from '../api/listCache';
 import {
   UndoAction,
   UndoEntry,
@@ -32,8 +32,9 @@ import {
   QUEUE_CHANGED_EVENT,
   queuedMutationCount,
   syncOfflineQueue,
+  mutationEpoch, retryDelay, failedMutations,
 } from '../api/offlineQueue';
-import { ApiError, CLIENT_ID, getToken, notifyAuthExpired } from '../api/client';
+import { ApiError, getToken, notifyAuthExpired, sessionKey, CATALOG_CHANGED_EVENT, SESSION_CHANGED_EVENT } from '../api/client';
 import { sameName } from '../utils/wordForms';
 import { itemFingerprint } from '../utils/conversation';
 import { useT } from '../i18n';
@@ -62,6 +63,16 @@ export const useShoppingList = (list: string, viewer: string) => {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [pendingCount, setPendingCount] = useState(queuedMutationCount);
   const [accessDenied, setAccessDenied] = useState(false);
+  const [loading, setLoading] = useState(!readSnapshot(list));
+  const [loadError, setLoadError] = useState(false);
+  const [deletedError, setDeletedError] = useState(false);
+  const [deletedLoading, setDeletedLoading] = useState(false);
+  const [failedCount, setFailedCount] = useState(() => failedMutations().length);
+  const session = useRef(sessionKey());
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const localVersion = useRef(0);
+  const fetchVersion = useRef(0);
 
   // Mutation callbacks read the latest items through this ref, and every write
   // goes through `applyItems` so the ref is current *synchronously* — two adds
@@ -71,6 +82,8 @@ export const useShoppingList = (list: string, viewer: string) => {
 
   const applyItems = useCallback(
     (updater: (prev: Item[]) => Item[]) => {
+      if (!mounted.current || sessionKey() !== session.current) return;
+      localVersion.current++;
       const next = updater(itemsRef.current);
       itemsRef.current = next;
       setItems(next);
@@ -85,9 +98,13 @@ export const useShoppingList = (list: string, viewer: string) => {
 
   const pushUndo = useCallback(
     (label: string, action: UndoAction) => {
-      undoStackRef.current.push({ label, action });
+      if (!mounted.current || sessionKey() !== session.current) return undefined;
+      const id = generateItemId();
+      const stored = readUndoStack(list);
+      undoStackRef.current = [...stored, { id, label, action }];
       if (undoStackRef.current.length > UNDO_STACK_LIMIT) undoStackRef.current.shift();
       writeUndoStack(list, undoStackRef.current);
+      return id;
     },
     [list],
   );
@@ -102,15 +119,19 @@ export const useShoppingList = (list: string, viewer: string) => {
   const deletedVisibleRef = useRef(false);
 
   const loadDeleted = useCallback(async () => {
+    const version = localVersion.current;
+    setDeletedLoading(true);
     try {
       const data = await fetchDeletedItems(list);
       // The drawer is a convenience — but it is rendered inside the list, so
       // anything other than an array here would take the whole screen down
       // with it rather than just showing nothing.
+      if (!mounted.current || sessionKey() !== session.current || version !== localVersion.current || queuedMutationCount()) return;
       setDeletedItems(Array.isArray(data) ? data : []);
+      setDeletedError(false);
     } catch {
-      // An empty drawer is better than an error page.
-    }
+      if (mounted.current) setDeletedError(true);
+    } finally { if (mounted.current) setDeletedLoading(false); }
   }, [list]);
 
   /** Told by the drawer whether anyone is looking at it. */
@@ -130,50 +151,78 @@ export const useShoppingList = (list: string, viewer: string) => {
 
   const loadItems = useCallback(
     async (notifyOnChange = false) => {
-      if (queuedMutationCount() > 0) return;
+      if (queuedMutationCount() > 0) { setLoading(false); return; }
+      const version = localVersion.current;
+      const epoch = mutationEpoch();
+      const requestId = ++fetchVersion.current;
       try {
         const data = await fetchItems(list);
-        if (queuedMutationCount() > 0) return;
+        if (!mounted.current || sessionKey() !== session.current || requestId !== fetchVersion.current ||
+            version !== localVersion.current || epoch !== mutationEpoch() || queuedMutationCount() > 0) return;
         setAccessDenied(false);
+        setLoadError(false);
         if (notifyOnChange && !sameList(itemsRef.current, data)) {
           toast(tRef.current('listUpdated'), { icon: '🔄', id: 'remote-update' });
         }
         applyItems(() => data);
         if (deletedVisibleRef.current) void loadDeleted();
       } catch (err) {
+        if (!mounted.current || sessionKey() !== session.current || requestId !== fetchVersion.current) return;
         if (err instanceof ApiError && err.status === 403) {
+          removeSnapshot(list);
           setAccessDenied(true);
           return;
         }
         // Anything else (offline, server hiccup) keeps whatever is on screen —
         // the cached list is far more useful than a blank one.
-        console.error('Error fetching items:', err);
-      }
+        setLoadError(true);
+      } finally { if (mounted.current && requestId === fetchVersion.current) setLoading(false); }
     },
     [list, applyItems, loadDeleted],
   );
 
   const runSync = useCallback(async () => {
-    const result = await syncOfflineQueue();
+    let result;
+    try { result = await syncOfflineQueue(); }
+    catch { if (mounted.current) setLoadError(true); return; }
+    if (!mounted.current || sessionKey() !== session.current) return;
     setPendingCount(queuedMutationCount());
+    setFailedCount(failedMutations().length);
     if (result.rejected > 0) {
-      toast.error(tRef.current('syncFailed', { count: result.rejected }));
+      toast.error(tRef.current('syncFailed', { count: result.rejected }), { id: 'sync-failed' });
     }
     if (result.sent > 0 || result.rejected > 0) await loadItems();
   }, [loadItems]);
 
   useEffect(() => {
+    let disposed = false;
+    let retryTimer: ReturnType<typeof setTimeout>;
+    let failures = 0;
+    let retryRunning = false;
+    const retry = async () => {
+      if (disposed || retryRunning || sessionKey() !== session.current) return;
+      retryRunning = true;
+      clearTimeout(retryTimer);
+      try { await runSync(); } finally { retryRunning = false; }
+      if (disposed) return;
+      if (queuedMutationCount()) {
+        const delay = Math.max(retryDelay(), Math.min(60_000, 1000 * 2 ** Math.min(failures++, 6)) + Math.random() * 500);
+        retryTimer = setTimeout(() => void retry(), delay);
+      } else { failures = 0; }
+    };
     loadItems();
-    if (navigator.onLine && queuedMutationCount() > 0) void runSync();
+    if (navigator.onLine && queuedMutationCount() > 0) void retry();
 
     // A callback, not a fixed object: reconnects then present whatever token is
     // stored now, including one the server renewed since this socket was made.
-    const socket = io({ auth: (cb) => cb({ token: getToken() }) });
+    let socketToken = getToken();
+    const socket = io({ auth: (cb) => { socketToken = getToken(); cb({ token: socketToken }); } });
     let firstConnect = true;
     socket.on('connect', () => {
       // Room membership dies with the connection — re-join on every (re)connect
       // and catch up on whatever was missed while disconnected.
       socket.emit('join_list', { list });
+      void retry();
       if (firstConnect) {
         firstConnect = false;
         return;
@@ -181,14 +230,20 @@ export const useShoppingList = (list: string, viewer: string) => {
       loadItems(true);
     });
     socket.on('connect_error', (err: Error) => {
-      if (err.message === 'unauthorized') notifyAuthExpired();
+      if (err.message === 'unauthorized' && socketToken === getToken()) notifyAuthExpired();
     });
-    socket.on('list_updated', (payload: { actor?: string | null } | undefined) => {
-      // Our own change is already on screen optimistically; refetching it would
-      // only risk flashing the pre-update value back at the user.
-      if (payload?.actor && payload.actor === CLIENT_ID) return;
+    socket.on('list_updated', () => {
+      // Refresh all echoes; pending writes and request generations guard stale reads.
       loadItems(true);
     });
+    socket.on('catalog_updated', () => window.dispatchEvent(new Event(CATALOG_CHANGED_EVENT)));
+    socket.on('access_revoked', () => { removeSnapshot(list); setAccessDenied(true); window.dispatchEvent(new Event(CATALOG_CHANGED_EVENT)); });
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+    socket.on('disconnect', (reason: string) => {
+      if (!disposed && reason === 'io server disconnect') reconnectTimer = setTimeout(() => socket.connect(), 1500);
+    });
+    const reconnect = () => { socket.disconnect(); if (getToken() && sessionKey() === session.current) socket.connect(); };
+    window.addEventListener(SESSION_CHANGED_EVENT, reconnect);
     socket.on('presence', (users: unknown) => {
       setViewers(
         Array.isArray(users) ? users.filter((u): u is string => typeof u === 'string') : [],
@@ -198,7 +253,7 @@ export const useShoppingList = (list: string, viewer: string) => {
     const handleOnline = () => {
       setIsOffline(false);
       toast.success(tRef.current('backOnline'), { id: 'connectivity' });
-      void runSync().then(() => loadItems());
+      void retry().then(() => loadItems());
     };
     const handleOffline = () => {
       setIsOffline(true);
@@ -206,14 +261,29 @@ export const useShoppingList = (list: string, viewer: string) => {
     };
     const handleQueueChange = () => {
       setPendingCount(queuedMutationCount());
-      if (navigator.onLine && queuedMutationCount() > 0) void runSync();
+      setFailedCount(failedMutations().length);
+      if (navigator.onLine && queuedMutationCount() > 0) void retry();
     };
 
+    const refresh = () => { if (document.visibilityState !== 'hidden') void retry().then(() => loadItems()); };
+    const storage = (event: StorageEvent) => { if (event.key?.startsWith('undo_stack_v2:')) undoStackRef.current = readUndoStack(list); if (event.key?.startsWith('mutation_v3:')) { handleQueueChange(); if (!queuedMutationCount()) void loadItems(); } };
+    window.addEventListener('focus', refresh);
+    window.addEventListener('pageshow', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('storage', storage);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     window.addEventListener(QUEUE_CHANGED_EVENT, handleQueueChange);
 
     return () => {
+      disposed = true;
+      clearTimeout(retryTimer);
+      clearTimeout(reconnectTimer);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('pageshow', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('storage', storage);
+      window.removeEventListener(SESSION_CHANGED_EVENT, reconnect);
       socket.disconnect();
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
@@ -241,16 +311,18 @@ export const useShoppingList = (list: string, viewer: string) => {
   );
 
   const applyRemove = useCallback(
-    async (id: string) => {
+    async (id: string, expected?: ItemExpectation) => {
       const removed = itemsRef.current.find((item) => item.id === id);
       applyItems((prev) => prev.filter((item) => item.id !== id));
       // Deleting only moves the item to the drawer, so mirror that locally
       // instead of waiting for a refetch to reveal it.
       if (removed) noteDeleted(removed);
       try {
-        await deleteItem(id, list);
+        await deleteItem(id, list, expected);
+        return true;
       } catch {
-        loadItems();
+        await loadItems();
+        return false;
       }
     },
     [list, applyItems, loadItems, noteDeleted],
@@ -259,7 +331,7 @@ export const useShoppingList = (list: string, viewer: string) => {
   const applyCount = useCallback(
     async (id: string, delta: number, expectedUnit?: Unit | null) => {
       const before = itemsRef.current.find((item) => item.id === id);
-      if (!before || (expectedUnit !== undefined && expectedUnit !== (before.unit ?? null))) return;
+      if (!before || (expectedUnit !== undefined && expectedUnit !== (before.unit ?? null))) return false;
       applyItems((prev) =>
         prev
           .map((item) =>
@@ -284,14 +356,14 @@ export const useShoppingList = (list: string, viewer: string) => {
   );
 
   const applyBought = useCallback(
-    async (id: string, bought: boolean) => {
+    async (id: string, bought: boolean, expected?: ItemExpectation) => {
       applyItems((prev) =>
         prev.map((item) =>
           item.id === id ? { ...item, bought, bought_at: bought ? Date.now() : null } : item,
         ),
       );
       try {
-        await setItemBought(id, list, bought);
+        await setItemBought(id, list, bought, expected);
         return true;
       } catch {
         loadItems();
@@ -336,8 +408,10 @@ export const useShoppingList = (list: string, viewer: string) => {
       });
       try {
         await reorderItems(list, ids);
+        return true;
       } catch {
-        loadItems();
+        await loadItems();
+        return false;
       }
     },
     [list, applyItems, loadItems],
@@ -352,12 +426,13 @@ export const useShoppingList = (list: string, viewer: string) => {
       const next = Math.min(quantityLimit(item.unit), Math.max(0, roundQuantity(item.count + delta)));
       const appliedDelta = roundQuantity(next - item.count);
       if (!appliedDelta) return;
+      if (!await applyCount(id, appliedDelta)) return false;
       if (next <= 0) {
         pushUndo(item.name, { kind: 'restoreItems', items: [{ ...item }] });
       } else {
         pushUndo(item.name, { kind: 'changeCount', id, delta: -appliedDelta, unit: item.unit ?? null });
       }
-      return applyCount(id, appliedDelta);
+      return true;
     },
     [applyCount, pushUndo],
   );
@@ -384,8 +459,10 @@ export const useShoppingList = (list: string, viewer: string) => {
       if (existing) {
         if (existing.bought) {
           // Re-adding something already checked off puts it back on the list.
-          pushUndo(existing.name, { kind: 'setBought', id: existing.id, bought: true });
-          return await applyBought(existing.id, false) ? itemsRef.current.find((item) => item.id === existing.id) : undefined;
+          const edit = { count: convertQuantity(count, unit, existing.unit)!, bought: false };
+          if (!await applyEdit(existing.id, edit, itemExpectation(existing))) return undefined;
+          pushUndo(existing.name, { kind: 'editItem', id: existing.id, edit: { count: existing.count, bought: true }, expected: itemExpectation({ ...existing, ...edit }) });
+          return itemsRef.current.find(item => item.id === existing.id);
         }
         return await changeCount(existing.id, convertQuantity(count, unit, existing.unit)!)
           ? itemsRef.current.find((item) => item.id === existing.id) : undefined;
@@ -401,18 +478,19 @@ export const useShoppingList = (list: string, viewer: string) => {
         bought: false,
         bought_at: null,
       };
-      pushUndo(trimmed, { kind: 'removeItem', id: newItem.id });
-      return await applyAdd(newItem) ? itemsRef.current.find((item) => item.id === newItem.id) : undefined;
+      if (!await applyAdd(newItem)) return undefined;
+      pushUndo(trimmed, { kind: 'removeItem', id: newItem.id, expected: itemExpectation(newItem) });
+      return itemsRef.current.find(item => item.id === newItem.id);
     },
-    [list, changeCount, applyAdd, applyBought, pushUndo],
+    [list, changeCount, applyAdd, applyEdit, pushUndo],
   );
 
   const removeItem = useCallback(
     async (id: string) => {
       const item = itemsRef.current.find((i) => i.id === id);
       if (!item) return;
-      pushUndo(item.name, { kind: 'restoreItems', items: [{ ...item }] });
-      await applyRemove(id);
+      if (!await applyRemove(id)) return undefined;
+      return pushUndo(item.name, { kind: 'restoreItems', items: [{ ...item }] });
     },
     [applyRemove, pushUndo],
   );
@@ -445,8 +523,8 @@ export const useShoppingList = (list: string, viewer: string) => {
       if (next.note !== undefined) previous.note = item.note ?? null;
       if (next.count !== undefined || next.unit !== undefined) { previous.count = item.count; previous.unit = item.unit ?? null; }
 
-      if (!await applyEdit(id, next, expected ? itemExpectation(expected) : undefined)) return false;
-      pushUndo(item.name, { kind: 'editItem', id, edit: previous });
+      if (!await applyEdit(id, next, itemExpectation(expected ?? item))) return false;
+      pushUndo(item.name, { kind: 'editItem', id, edit: previous, expected: itemExpectation({ ...item, ...next }) });
       return true;
     },
     [applyEdit, pushUndo],
@@ -454,6 +532,7 @@ export const useShoppingList = (list: string, viewer: string) => {
 
   const applyMove = useCallback(async (item: Item, from: string, to: string, expected?: ItemExpectation) => {
     const moved = await moveItemRequest(item.id, from, to, expected) ?? { ...item, list_id: to };
+    if (!mounted.current || sessionKey() !== session.current) throw new Error('Session changed');
     const source = from === list ? itemsRef.current : (readSnapshot(from)?.items ?? []);
     const target = to === list ? itemsRef.current : (readSnapshot(to)?.items ?? []);
     const sourceNext = source.filter((entry) => entry.id !== item.id);
@@ -481,8 +560,9 @@ export const useShoppingList = (list: string, viewer: string) => {
     async (id: string, bought: boolean) => {
       const item = itemsRef.current.find((i) => i.id === id);
       if (!item || item.bought === bought) return;
-      pushUndo(item.name, { kind: 'setBought', id, bought: !bought });
-      await applyBought(id, bought);
+      if (!await applyBought(id, bought)) return false;
+      pushUndo(item.name, { kind: 'setBought', id, bought: !bought, expected: itemExpectation({ ...item, bought }) });
+      return true;
     },
     [applyBought, pushUndo],
   );
@@ -500,8 +580,9 @@ export const useShoppingList = (list: string, viewer: string) => {
     async (ids: string[]) => {
       const before = itemsRef.current.filter((item) => !item.bought).map((item) => item.id);
       if (before.length === ids.length && before.every((id, i) => id === ids[i])) return;
+      if (!await applyOrder(ids)) { toast.error(tRef.current('voiceChangeFailed')); return false; }
       pushUndo(tRef.current('orderLabel'), { kind: 'reorder', ids: before });
-      await applyOrder(ids);
+      return true;
     },
     [applyOrder, pushUndo],
   );
@@ -510,15 +591,11 @@ export const useShoppingList = (list: string, viewer: string) => {
     const boughtItems = itemsRef.current.filter((item) => item.bought).map((item) => ({ ...item }));
     if (boughtItems.length === 0) return;
 
-    pushUndo(`${tRef.current('bought')} (${boughtItems.length})`, {
-      kind: 'restoreItems',
-      items: boughtItems,
-    });
-
     applyItems((prev) => prev.filter((item) => !item.bought));
     try {
-      await clearBoughtItems(list);
+      await clearBoughtItems(list, boughtItems.map(item => item.id));
       if (deletedVisibleRef.current) void loadDeleted();
+      return pushUndo(`${tRef.current('bought')} (${boughtItems.length})`, { kind: 'restoreItems', items: boughtItems });
     } catch {
       loadItems();
     }
@@ -535,25 +612,30 @@ export const useShoppingList = (list: string, viewer: string) => {
           ...prev.filter((entry) => entry.id !== id),
           { ...item, bought: false, bought_at: null, deleted_at: null },
         ]);
-        pushUndo(item.name, { kind: 'removeItem', id });
       }
       try {
         await restoreItemRequest(id, list);
+        if (item) pushUndo(item.name, { kind: 'removeItem', id, expected: itemExpectation({ ...item, bought: false }) });
+        return true;
       } catch {
         loadItems();
+        return false;
       }
     },
     [deletedItems, list, applyItems, loadItems, pushUndo],
   );
 
   const purgeDeleted = useCallback(async () => {
+    const ids = deletedItems.map(item => item.id);
     setDeletedItems([]);
     try {
-      await purgeDeletedItems(list);
+      await purgeDeletedItems(list, ids);
+      return true;
     } catch {
       void loadDeleted();
+      return false;
     }
-  }, [list, loadDeleted]);
+  }, [list, loadDeleted, deletedItems]);
 
   // ---- undo ----
 
@@ -561,21 +643,21 @@ export const useShoppingList = (list: string, viewer: string) => {
     async (action: UndoAction) => {
       switch (action.kind) {
         case 'removeItem':
-          return applyRemove(action.id);
+          return applyRemove(action.id, action.expected);
         case 'restoreItems':
           // Sequential on purpose: restoring a whole cleared cart must land in
           // the order it was in, and each POST assigns the next position.
-          for (const item of action.items) await applyAdd(item);
-          return;
+          for (const item of action.items) if (!await applyAdd(item)) return false;
+          return true;
         case 'changeCount':
           return applyCount(action.id, action.delta, action.unit ?? null);
         case 'setBought':
-          return applyBought(action.id, action.bought);
+          return applyBought(action.id, action.bought, action.expected);
         case 'editItem':
-          return applyEdit(action.id, action.edit);
+          return applyEdit(action.id, action.edit, action.expected);
         case 'moveItem':
-          await applyMove(action.item, action.from, action.to);
-          return;
+          await applyMove(action.item, action.from, action.to, itemExpectation(action.item));
+          return true;
         case 'reorder':
           return applyOrder(action.ids);
       }
@@ -602,16 +684,19 @@ export const useShoppingList = (list: string, viewer: string) => {
   };
 
   /** Reverts the most recent action; returns its label, or null if nothing to undo. */
-  const undo = useCallback(async () => {
+  const undo = useCallback(async (actionId?: string) => {
+    undoStackRef.current = readUndoStack(list);
     while (undoStackRef.current.length > 0) {
-      const entry = undoStackRef.current.pop()!;
+      const index = actionId ? undoStackRef.current.findIndex(entry => entry.id === actionId) : undoStackRef.current.length - 1;
+      if (index < 0) return null;
+      const [entry] = undoStackRef.current.splice(index, 1);
       writeUndoStack(list, undoStackRef.current);
-      if (!isApplicable(entry.action)) continue;
+      if (!isApplicable(entry.action)) { if (actionId) return null; continue; }
       try {
         const result = await runUndoAction(entry.action);
         if (result === false) throw new Error('Undo failed');
       } catch (error) {
-        undoStackRef.current.push(entry);
+        undoStackRef.current.splice(index, 0, entry);
         writeUndoStack(list, undoStackRef.current);
         throw error;
       }
@@ -628,7 +713,10 @@ export const useShoppingList = (list: string, viewer: string) => {
     otherViewers,
     isOffline,
     pendingCount,
-    accessDenied,
+    accessDenied, loading, loadError, deletedError, deletedLoading, failedCount,
+    retrySync: () => runSync().then(() => loadItems()),
+    retryDeleted: loadDeleted,
+    lastUndoId: () => undoStackRef.current.at(-1)?.id,
     addItem,
     removeItem,
     editItem,

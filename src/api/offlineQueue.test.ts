@@ -139,12 +139,12 @@ describe('offlineQueue', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1); // stops at the first failure, keeps order
   });
 
-  it('discards the legacy v1 queue', async () => {
+  it('retains unowned legacy data for explicit recovery', async () => {
     localStorage.setItem('offline_queue', JSON.stringify([{ url: '/x', options: {} }]));
     vi.stubGlobal('fetch', vi.fn());
 
     await syncOfflineQueue();
 
-    expect(localStorage.getItem('offline_queue')).toBeNull();
+    expect(localStorage.getItem('offline_queue')).not.toBeNull();
   });
 });
