@@ -49,14 +49,17 @@ const seedItem = async (account, name, count = 1, fields = {}) => {
   await api('/api/items', account.token, 'POST', item);
   return item;
 };
-const openAccount = async (account, { width = 390, helpSeen = true, serviceWorkers = 'block', list, mockSpeech = true } = {}) => {
+const openAccount = async (account, { width = 390, helpSeen = true, serviceWorkers = 'block', list, mockSpeech = true, legacy = {}, blockStorage = false, blockRealtime = false } = {}) => {
   const context = await browser.newContext({ viewport: { width, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1, serviceWorkers });
-  await context.addInitScript(({ account, helpSeen, mockSpeech }) => {
+  if(blockRealtime) await context.route('**/socket.io/**',route=>route.abort());
+  await context.addInitScript(({ account, helpSeen, mockSpeech, legacy, blockStorage }) => {
+    if(blockStorage) Object.defineProperty(window,'indexedDB',{value:undefined,configurable:true});
     if (!sessionStorage.getItem('review_initialized')) {
       localStorage.setItem('username', account.username);
       localStorage.setItem('token', account.token);
       if (helpSeen) localStorage.setItem('help_seen_v1', '1');
       localStorage.setItem('sound_enabled', '0');
+      for(const [key,value] of Object.entries(legacy)) localStorage.setItem(key,value);
       sessionStorage.setItem('review_initialized', '1');
     }
     if (mockSpeech) {
@@ -67,7 +70,7 @@ const openAccount = async (account, { width = 390, helpSeen = true, serviceWorke
         abort() {}
       };
     }
-  }, { account: { username: account.username, token: account.token }, helpSeen, mockSpeech });
+  }, { account: { username: account.username, token: account.token }, helpSeen, mockSpeech, legacy, blockStorage });
   const page = await context.newPage();
   page.setDefaultTimeout(5000);
   const errors = [];
@@ -75,6 +78,7 @@ const openAccount = async (account, { width = 390, helpSeen = true, serviceWorke
   await page.goto(base + (list ? '/?list=' + list : '/'), { waitUntil: 'networkidle' });
   return { context, page, errors };
 };
+const queueCount = page => page.evaluate(async () => { const request=indexedDB.open('shopping-local-v1',1); const db=await new Promise((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);}); const tx=db.transaction('records'); const read=tx.objectStore('records').getAllKeys(); const keys=await new Promise(resolve=>{read.onsuccess=()=>resolve(read.result);});db.close();return keys.filter(key=>key.startsWith('mutation_v3:')).length; });
 const rows = async (account) => (await api('/api/items?list=' + account.username, account.token)).data;
 
 try {
@@ -152,6 +156,34 @@ try {
     await page.screenshot({path:screenshot('composer-long-list-320.png')});
     await context.close();
     return {keyboardReorder:true,bottomComposer:geometry,manualAdd:true};
+  });
+
+  await probe('large_text_landscape_and_keyboard_geometry', async()=>{
+    const {context,page,errors}=await openAccount(phone,{width:320});
+    await page.evaluate(()=>{document.documentElement.style.fontSize='200%';});
+    await page.screenshot({path:screenshot('large-text-320.png')});
+    const title=await page.getByRole('button',{name:/^Выбрать список:/}).boundingBox();
+    const input=await page.getByRole('textbox',{name:'Добавить вручную…'}).boundingBox();
+    assert.ok(title && title.width>=150 && title.height<160);
+    assert.ok(input && input.width>=130);
+    const nameWidth=await page.locator('[class*="itemName"]').first().evaluate(element=>element.getBoundingClientRect().width);
+    assert.ok(nameWidth>=150);
+    await page.getByRole('checkbox',{name:'Отметить купленным: Молоко безлактозное',exact:true}).scrollIntoViewIfNeeded();
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    await page.setViewportSize({width:844,height:390});
+    await page.screenshot({path:screenshot('landscape-844.png')});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    await page.evaluate(()=>{document.documentElement.style.fontSize='';});
+    await page.setViewportSize({width:390,height:844});
+    await page.evaluate(()=>{
+      Object.defineProperty(visualViewport,'height',{configurable:true,get:()=>480});
+      Object.defineProperty(visualViewport,'offsetTop',{configurable:true,get:()=>0});
+      visualViewport.dispatchEvent(new Event('resize'));
+    });
+    await sleep(100);
+    const bounds=await page.locator('[class*="composer"]').first().boundingBox();
+    assert.ok(bounds && bounds.y+bounds.height<=481);
+    await context.close();assert.deepEqual(errors,[]);return {largeText200Percent:true,landscape:true,simulatedKeyboardComposerBottom:bounds.y+bounds.height};
   });
 
   await probe('lost_quantity_response_applies_once', async () => {
@@ -467,14 +499,120 @@ try {
     await page.getByRole('button', { name: 'Ещё один: молоко', exact: true }).click();
     await other.getByRole('button', { name: 'Количество: молоко', exact: true }).click();
     await other.getByRole('button', { name: 'Ещё один: молоко', exact: true }).click();
-    const count = await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('mutation_v3:')).length);
+    const count = await queueCount(page);
     assert.equal(count, 2);
     await context.setOffline(false);
     await sleep(1800);
     assert.equal((await rows(account))[0].count, 3);
-    assert.equal(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('mutation_v3:')).length), 0);
+    assert.equal(await queueCount(page), 0);
     await context.close();
     return { queued: count, finalCount: 3 };
+  });
+
+  await probe('indexeddb_migration_survives_reload_and_sends_old_intent_once', async () => {
+    const account=await register('storage_migration');
+    const item=await seedItem(account,'молоко',2);
+    const accountId=JSON.parse(Buffer.from(account.token.split('.')[1],'base64url')).sub;
+    const oldId=randomUUID();
+    const key=`mutation_v3:${accountId}:${oldId}`;
+    const snapshot=`list_snapshot_v2:${accountId}:${account.username}`;
+    const legacy={
+      [key]:JSON.stringify({id:oldId,account:accountId,createdAt:1,url:`/api/items/${item.id}/count`,method:'PATCH',body:{list:account.username,delta:1}}),
+      [snapshot]:JSON.stringify({items:[{...item,list_id:account.username,count:3}],savedAt:1,confirmedAt:1000,dirty:true}),
+    };
+    const blocked=await openAccount(account,{legacy,blockStorage:true});
+    assert.ok(await blocked.page.getByText('Не удалось открыть хранилище на устройстве.',{exact:false}).isVisible());
+    assert.equal(await blocked.page.evaluate(key=>localStorage.getItem(key),key),legacy[key]);
+    await blocked.context.close();
+    const {context,page,errors}=await openAccount(account,{legacy,serviceWorkers:'allow'});
+    await page.evaluate(()=>navigator.serviceWorker.ready);
+    await page.reload({waitUntil:'networkidle'});
+    assert.equal((await rows(account))[0].count,3);
+    assert.equal(await page.evaluate(key=>localStorage.getItem(key),key),null);
+    assert.equal(await queueCount(page),0);
+    await page.reload({waitUntil:'networkidle'});
+    assert.equal((await rows(account))[0].count,3);
+    assert.deepEqual(errors,[]);
+    await context.close();
+    return {oldIntentAppliedOnce:true,legacyRetainedWhenUnavailable:true,reload:true};
+  });
+
+  await probe('indexeddb_abort_keeps_draft_and_does_not_claim_saved',async()=>{
+    const account=await register('storage_abort');
+    await seedItem(account,'хлеб');
+    const {context,page,errors}=await openAccount(account);
+    await page.evaluate(()=>{
+      const put=IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put=function(value,...args){if(value?.key?.startsWith('list_snapshot_v2:')) throw new DOMException('Test quota','QuotaExceededError');return put.call(this,value,...args);};
+    });
+    await page.getByRole('textbox',{name:'Добавить вручную…'}).fill('молоко');
+    await page.getByRole('button',{name:'Добавить',exact:true}).click();
+    await page.getByRole('alert').filter({hasText:'Изменение не удалось сохранить'}).waitFor();
+    assert.equal(await page.getByRole('textbox',{name:'Добавить вручную…'}).inputValue(),'молоко');
+    assert.equal(await page.getByRole('checkbox',{name:'Отметить купленным: молоко',exact:true}).count(),0);
+    assert.equal(await queueCount(page),0);
+    assert.equal((await rows(account)).length,1);
+    assert.deepEqual(errors,[]);
+    await context.close();return {atomicAbort:true,draftRetained:true,noFalseSuccess:true};
+  });
+
+  await probe('review_conflict_compares_current_item_and_rechecks_concurrent_edit',async()=>{
+    const account=await register('conflict_review');
+    const item=await seedItem(account,'молоко',1,{note:'исходная заметка'});
+    const {context,page,errors}=await openAccount(account,{blockRealtime:true});
+    const mutationIds=[];
+    page.on('request',request=>{if(request.method()==='PATCH' && request.url().includes(`/api/items/${item.id}`)) mutationIds.push(request.headers()['x-mutation-id']);});
+    await page.getByRole('button',{name:'Изменить: молоко',exact:true}).click();
+    await page.getByRole('textbox',{name:'Заметка: какой именно'}).fill('мой черновик');
+    await api(`/api/items/${item.id}`,account.token,'PATCH',{list:account.username,note:'чужая заметка'});
+    await page.getByRole('button',{name:'Сохранить',exact:true}).click();
+    await page.getByRole('alert').filter({hasText:'Не удалось сохранить'}).waitFor();
+    await page.getByRole('button',{name:'Отмена',exact:true}).click();
+    await page.getByRole('button',{name:'Синхронизация',exact:true}).click();
+    await page.getByRole('button',{name:'Проверить изменение',exact:true}).click();
+    await page.getByRole('heading',{name:'На сервере сейчас'}).waitFor();
+    await page.getByRole('dialog').getByText(/молоко.*чужая заметка/).waitFor();
+    assert.equal(await page.getByRole('textbox',{name:'Заметка: какой именно'}).inputValue(),'мой черновик');
+    await page.setViewportSize({width:320,height:740});
+    await page.screenshot({path:screenshot('conflict-review-320.png')});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    await api(`/api/items/${item.id}`,account.token,'PATCH',{list:account.username,note:'ещё одна правка'});
+    await page.getByRole('button',{name:'Отправить проверенное изменение'}).click();
+    await page.getByRole('button',{name:'Проверить изменение',exact:true}).waitFor();
+    assert.equal((await rows(account))[0].note,'ещё одна правка');
+    await page.getByRole('button',{name:'Проверить изменение',exact:true}).click();
+    await page.getByRole('dialog').getByText(/молоко.*ещё одна правка/).waitFor();
+    await page.getByRole('textbox',{name:'Заметка: какой именно'}).fill('проверенная заметка');
+    await page.getByRole('button',{name:'Отправить проверенное изменение'}).click();
+    await page.getByText('Нет ожидающих или отклонённых изменений.').waitFor();
+    assert.equal((await rows(account))[0].note,'проверенная заметка');
+    assert.equal(new Set(mutationIds).size,3);
+    assert.deepEqual(errors,[]);await context.close();
+    return {newIdForEachReview:true,secondConflictPreserved:true,reviewedChangeSaved:true};
+  });
+
+  await probe('revision_poll_recovers_without_socket_and_offline_keeps_confirmation_time',async()=>{
+    const account=await register('revision_poll');
+    const item=await seedItem(account,'молоко');
+    const {context,page,errors}=await openAccount(account,{blockRealtime:true,serviceWorkers:'allow'});
+    await page.evaluate(()=>navigator.serviceWorker.ready);
+    await page.reload({waitUntil:'networkidle'});
+    const initial=await page.locator('time').getAttribute('datetime');
+    await api(`/api/items/${item.id}`,account.token,'PATCH',{list:account.username,name:'обновлённое молоко'});
+    await page.getByRole('checkbox',{name:'Отметить купленным: обновлённое молоко',exact:true}).waitFor({timeout:36000});
+    const confirmed=await page.locator('time').getAttribute('datetime');assert.notEqual(confirmed,initial);
+    await page.evaluate(()=>navigator.serviceWorker.ready);
+    await context.setOffline(true);
+    await page.getByRole('textbox',{name:'Добавить вручную…'}).fill('хлеб');
+    await page.getByRole('button',{name:'Добавить',exact:true}).click();
+    await page.getByRole('checkbox',{name:'Отметить купленным: хлеб',exact:true}).waitFor();
+    await page.waitForFunction(async()=>{const db=await new Promise(resolve=>{const r=indexedDB.open('shopping-local-v1');r.onsuccess=()=>resolve(r.result);});const keys=await new Promise(resolve=>{const r=db.transaction('records').objectStore('records').getAllKeys();r.onsuccess=()=>resolve(r.result);});db.close();return keys.some(key=>key.startsWith('mutation_v3:'));});
+    assert.equal(await page.locator('time').getAttribute('datetime'),confirmed);
+    await page.reload({waitUntil:'domcontentloaded'});
+    await page.getByRole('checkbox',{name:'Отметить купленным: хлеб',exact:true}).waitFor();
+    assert.equal(await page.locator('time').getAttribute('datetime'),confirmed);
+    assert.equal(await queueCount(page),1);
+    assert.deepEqual(errors,[]);await context.close();return {missedEventRecovered:true,offlineTimeUnchanged:true,queuedSnapshotSurvivesReload:true};
   });
 
   await probe('password_change_keeps_current_browser_authenticated', async () => {

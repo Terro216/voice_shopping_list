@@ -22,7 +22,7 @@ import {
 // clients reconcile all echoes with guards for in-flight local changes.
 const notifyList = (req, pushLabel, list = req.list) => {
   const notify = () => {
-    req.app.get("io").to(`list_${list}`).emit("list_updated", { actor: req.get("X-Client-Id") || null });
+    req.app.get("io").to(`list_${list}`).emit("list_updated", { actor: req.get("X-Client-Id") || null, version: db.prepare("SELECT version FROM lists WHERE id = ?").get(list)?.version });
     if (pushLabel) scheduleListPush(list, req.user.username, pushLabel);
   };
   if (req.afterCommit) req.afterCommit(notify); else notify();
@@ -117,7 +117,20 @@ export const getItems = (req, res) => {
   res.json(readListItems(req.list));
 };
 
-/** The "deleted" drawer: most recently removed first. */
+/** A revision and its full snapshot are read in one SQLite transaction. */
+export const getSync = (req, res) => {
+  sweepTrash();
+  const since=req.query.since;
+  if (since !== undefined && (typeof since !== "string" || !/^\d{1,16}$/.test(since) || !Number.isSafeInteger(Number(since)))) {
+    return res.status(400).json({error:"Invalid list version"});
+  }
+  const result=db.transaction(()=>{
+    const {version}=db.prepare("SELECT version FROM lists WHERE id = ?").get(req.list);
+    return {version,items:since !== undefined && Number(since)===version ? null : readListItems(req.list)};
+  })();
+  res.set("Cache-Control","no-store").json(result);
+};
+
 export const getDeletedItems = (req, res) => {
   sweepTrash();
   const rows = db

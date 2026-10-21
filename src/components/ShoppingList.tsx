@@ -75,7 +75,7 @@ export const ShoppingList = ({
     deletedItems,
     otherViewers,
     isOffline,
-    pendingCount,
+    pendingCount, lastSyncedAt,
     accessDenied, loading, loadError, deletedError, deletedLoading, failedCount, retrySync, retryDeleted, lastUndoId,
     beginUndoGroup, finishUndoGroup,
     addItem,
@@ -428,6 +428,9 @@ export const ShoppingList = ({
       {reordering && <div className={styles.reorderBar} role="status"><span>{t('reorderHint')}</span>
         <button type="button" onClick={() => setReordering(false)}>{t('done')}</button></div>}
 
+      <button type="button" className={styles.syncStatus} onClick={() => setSheet('sync')}>
+        {lastSyncedAt ? <>{t('syncConfirmed')} <time dateTime={new Date(lastSyncedAt).toISOString()}>{new Date(lastSyncedAt).toLocaleString(lang === 'ru' ? 'ru-RU' : 'en-GB', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</time></> : t('syncNotConfirmed')}
+      </button>
       {(isOffline || pendingCount > 0 || failedCount > 0 || loadError || legacyMutations().length > 0) && (
         <p className={styles.offlineBar} role="status">
           {isOffline && <span>📴 {t('offline')}</span>}
@@ -607,7 +610,7 @@ export const ShoppingList = ({
           onClose={() => setSheet('none')}
         />
       )}
-      {sheet === 'sync' && <SyncSheet onClose={() => setSheet('none')} onRetry={retrySync} />}
+      {sheet === 'sync' && <SyncSheet lastSyncedAt={lastSyncedAt} onClose={() => setSheet('none')} onRetry={retrySync} />}
       {sheet === 'help' && <HelpSheet onClose={() => setSheet('none')} />}
       {sheet === 'settings' && (
         <SettingsSheet

@@ -13,7 +13,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('sync regressions', () => {
   it('never sends another account’s queued intent', async () => {
-    enqueueMutation({ url: '/api/items/milk/count', method: 'PATCH', body: { delta: 1 } });
+    await enqueueMutation({ url: '/api/items/milk/count', method: 'PATCH', body: { delta: 1 } });
     account('bob');
     const fetch = vi.fn().mockResolvedValue(response());
     vi.stubGlobal('fetch', fetch);
@@ -26,7 +26,7 @@ describe('sync regressions', () => {
   });
 
   it('retains the same operation id after an ambiguous response', async () => {
-    enqueueMutation({ url: '/api/items/milk/count', method: 'PATCH', body: { delta: 1 } });
+    await enqueueMutation({ url: '/api/items/milk/count', method: 'PATCH', body: { delta: 1 } });
     const fetch = vi.fn().mockRejectedValueOnce(new TypeError('lost response')).mockResolvedValue(response());
     vi.stubGlobal('fetch', fetch);
     await syncOfflineQueue();
@@ -49,8 +49,8 @@ describe('sync regressions', () => {
   });
 
   it('stops an in-flight replay on session switch without adopting the old token', async () => {
-    enqueueMutation({ url: '/head', method: 'POST' });
-    enqueueMutation({ url: '/tail', method: 'POST' });
+    await enqueueMutation({ url: '/head', method: 'POST' });
+    await enqueueMutation({ url: '/tail', method: 'POST' });
     let release!: (value: Response) => void;
     const fetch = vi.fn().mockImplementation(() => new Promise(resolve => { release = resolve; }));
     vi.stubGlobal('fetch', fetch);
@@ -66,11 +66,11 @@ describe('sync regressions', () => {
   });
 
   it('retains rejected intent and isolates cached contents by immutable account', async () => {
-    enqueueMutation({ url: '/edit', method: 'PATCH', body: { name: 'новая покупка' } });
+    await enqueueMutation({ url: '/edit', method: 'PATCH', body: { name: 'новая покупка' } });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ error: 'Conflict' }, 409)));
     await syncOfflineQueue();
     expect(failedMutations()[0].body).toEqual({ name: 'новая покупка' });
-    writeSnapshot('shared', [{ id: 'x', name: 'alice draft', count: 1, bought: false, list_id: 'shared' }]);
+    await writeSnapshot('shared', [{ id: 'x', name: 'alice draft', count: 1, bought: false, list_id: 'shared' }]);
     account('bob');
     expect(failedMutations()).toHaveLength(0);
     expect(readSnapshot('shared')).toBeNull();
@@ -97,8 +97,8 @@ it('two runtimes never discard an unacknowledged tail even without Web Locks', a
   const second = await import('./offlineQueue');
   const deliveries: { url: string; resolve: (response: Response) => void; reject: (error: Error) => void }[] = [];
   vi.stubGlobal('fetch', vi.fn((url: string) => new Promise<Response>((resolve, reject) => deliveries.push({ url, resolve, reject }))));
-  first.enqueueMutation({ url: '/head', method: 'POST' });
-  first.enqueueMutation({ url: '/tail', method: 'POST' });
+  await first.enqueueMutation({ url: '/head', method: 'POST' });
+  await first.enqueueMutation({ url: '/tail', method: 'POST' });
   const a = first.syncOfflineQueue();
   const b = second.syncOfflineQueue();
   await vi.waitFor(() => expect(deliveries).toHaveLength(2));
@@ -115,15 +115,15 @@ it('two runtimes never discard an unacknowledged tail even without Web Locks', a
 });
 
 it('times out a stalled response body while retaining an ambiguous operation', async () => {
-  vi.useFakeTimers();
+  await enqueueMutation({url:'/api/items/milk/count',method:'PATCH',body:{delta:1}});
   try {
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => ({
       ok: true, status: 200, headers: new Headers(),
       json: () => new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new TypeError('body aborted')))),
     })));
-    const pending = submitMutation('/api/items/milk/count', 'PATCH', { delta: 1 });
-    await vi.advanceTimersByTimeAsync(15_100);
+    const pending = syncOfflineQueue();
+    await vi.waitFor(()=>expect(fetch).toHaveBeenCalled());
     await pending;
     expect(queuedMutationCount()).toBe(1);
   } finally { vi.useRealTimers(); }
-});
+}, 20000);

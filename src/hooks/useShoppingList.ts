@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import {
   Item,
   ItemEdit,
-  fetchItems,
+  fetchListSync,
   fetchDeletedItems,
   createItem,
   changeItemCount,
@@ -27,7 +27,8 @@ import {
   type UndoGroup,
   UNDO_STACK_LIMIT,
   readUndoStack,
-  writeUndoStack,
+  updateUndoStack,
+  undoKey,
 } from '../api/undoStack';
 import {
   QUEUE_CHANGED_EVENT,
@@ -35,6 +36,7 @@ import {
   syncOfflineQueue,
   mutationEpoch, retryDelay, failedMutations,
 } from '../api/offlineQueue';
+import { LOCAL_STORE_CHANGED, transactLocal, storageFailed } from '../api/localStore';
 import { ApiError, getToken, notifyAuthExpired, sessionKey, CATALOG_CHANGED_EVENT, SESSION_CHANGED_EVENT } from '../api/client';
 import { sameName } from '../utils/wordForms';
 import { itemFingerprint } from '../utils/conversation';
@@ -65,10 +67,11 @@ export const useShoppingList = (list: string, viewer: string) => {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [pendingCount, setPendingCount] = useState(queuedMutationCount);
   const [accessDenied, setAccessDenied] = useState(false);
-  const [loading, setLoading] = useState(!readSnapshot(list));
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [deletedError, setDeletedError] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState(() => readSnapshot(list)?.confirmedAt);
   const [failedCount, setFailedCount] = useState(() => failedMutations().length);
   const session = useRef(sessionKey());
   const mounted = useRef(true);
@@ -89,9 +92,9 @@ export const useShoppingList = (list: string, viewer: string) => {
       const next = updater(itemsRef.current);
       itemsRef.current = next;
       setItems(next);
-      writeSnapshot(list, next);
+
     },
-    [list],
+    [],
   );
 
   // ---- undo stack (persisted, so it survives a reload in the shop) ----
@@ -109,10 +112,10 @@ export const useShoppingList = (list: string, viewer: string) => {
   }, [list]);
 
   const pushUndo = useCallback(
-    (label: string, action: UndoAction, group?: UndoGroup) => {
+    async (label: string, action: UndoAction, group?: UndoGroup) => {
       if (!mounted.current || sessionKey() !== session.current) return undefined;
       const id = generateItemId();
-      const stored = readUndoStack(list);
+      const name = undoKey(list);
       const current = 'id' in action ? itemsRef.current.find(item => item.id === action.id) : undefined;
       const quantity = current ? formatQuantity(current, lang) : '';
       const summary = action.kind === 'removeItem' ? t('voiceAppliedAdd', { name: label, quantity })
@@ -121,13 +124,16 @@ export const useShoppingList = (list: string, viewer: string) => {
         : action.kind === 'moveItem' ? t('voiceAppliedMove', { name: label })
         : t('voiceAppliedEdit', { name: current?.name ?? label, quantity: [quantity, current?.note].filter(Boolean).join(' · ') });
       const entry = { id, label, action, summary };
-      if (group) {
-        const existing = stored.find(entry => entry.id === group.id);
-        if (existing?.action.kind === 'group') existing.action.entries.push(entry);
-        else stored.push({ id: group.id, label: group.label, action: { kind: 'group', entries: [entry] } });
-      } else stored.push(entry);
-      undoStackRef.current = stored.slice(-UNDO_STACK_LIMIT);
-      writeUndoStack(list, undoStackRef.current);
+      try { await transactLocal(records => {
+        const stored: UndoEntry[] = JSON.parse(records.get(name) ?? '[]');
+        if (group) {
+          const existing = stored.find(entry => entry.id === group.id);
+          if (existing?.action.kind === 'group') existing.action.entries.push(entry);
+          else stored.push({ id: group.id, label: group.label, action: { kind: 'group', entries: [entry] } });
+        } else stored.push(entry);
+        return { result: undefined, changes: [[name, JSON.stringify(stored.slice(-UNDO_STACK_LIMIT))]] };
+      }); } catch { toast.error(t('undoSaveFailed')); return undefined; }
+      undoStackRef.current = readUndoStack(list);
       return group?.id ?? id;
     },
     [list, t, lang],
@@ -170,7 +176,7 @@ export const useShoppingList = (list: string, viewer: string) => {
   /** Mirrors a deletion into the open drawer instead of waiting for a refetch. */
   const noteDeleted = useCallback((item: Item) => {
     if (!deletedVisibleRef.current) return;
-    setDeletedItems((prev) => [{ ...item, deleted_at: Date.now() }, ...prev]);
+    setDeletedItems((prev) => [{ ...item, deleted_at: Date.now() }, ...prev.filter(row => row.id !== item.id)]);
   }, []);
 
   const loadItems = useCallback(
@@ -180,7 +186,10 @@ export const useShoppingList = (list: string, viewer: string) => {
       const epoch = mutationEpoch();
       const requestId = ++fetchVersion.current;
       try {
-        const data = await fetchItems(list);
+        const snapshot = readSnapshot(list);
+        const state = await fetchListSync(list, snapshot?.dirty ? undefined : snapshot?.version);
+        if (!Number.isSafeInteger(state.version) || state.version < 0 || (state.items !== null && !Array.isArray(state.items))) throw new Error('Invalid sync response');
+        const data = state.items ?? snapshot?.items ?? [];
         if (!mounted.current || sessionKey() !== session.current || requestId !== fetchVersion.current ||
             version !== localVersion.current || epoch !== mutationEpoch() || queuedMutationCount() > 0) return;
         setAccessDenied(false);
@@ -188,12 +197,16 @@ export const useShoppingList = (list: string, viewer: string) => {
         if (notifyOnChange && !sameList(itemsRef.current, data)) {
           toast(tRef.current('listUpdated'), { icon: '🔄', id: 'remote-update' });
         }
+        const confirmedAt = Date.now();
+        if (!await writeSnapshot(list, data, { version: state.version, confirmedAt, dirty: false })) return;
+        if (!mounted.current || sessionKey() !== session.current || requestId !== fetchVersion.current || version !== localVersion.current || epoch !== mutationEpoch()) return;
         applyItems(() => data);
+        setLastSyncedAt(confirmedAt);
         if (deletedVisibleRef.current) void loadDeleted();
       } catch (err) {
         if (!mounted.current || sessionKey() !== session.current || requestId !== fetchVersion.current) return;
         if (err instanceof ApiError && err.status === 403) {
-          removeSnapshot(list);
+          void removeSnapshot(list).catch(storageFailed);
           setAccessDenied(true);
           return;
         }
@@ -256,12 +269,14 @@ export const useShoppingList = (list: string, viewer: string) => {
     socket.on('connect_error', (err: Error) => {
       if (err.message === 'unauthorized' && socketToken === getToken()) notifyAuthExpired();
     });
-    socket.on('list_updated', () => {
+    socket.on('list_updated', (event?: {version?:number}) => {
+      const snapshot=readSnapshot(list);
+      if (event?.version !== undefined && snapshot?.version !== undefined && event.version <= snapshot.version && !snapshot.dirty) return;
       // Refresh all echoes; pending writes and request generations guard stale reads.
       loadItems(true);
     });
     socket.on('catalog_updated', () => window.dispatchEvent(new Event(CATALOG_CHANGED_EVENT)));
-    socket.on('access_revoked', () => { removeSnapshot(list); setAccessDenied(true); window.dispatchEvent(new Event(CATALOG_CHANGED_EVENT)); });
+    socket.on('access_revoked', () => { void removeSnapshot(list).catch(storageFailed); setAccessDenied(true); window.dispatchEvent(new Event(CATALOG_CHANGED_EVENT)); });
     let reconnectTimer: ReturnType<typeof setTimeout>;
     socket.on('disconnect', (reason: string) => {
       if (!disposed && reason === 'io server disconnect') reconnectTimer = setTimeout(() => socket.connect(), 1500);
@@ -291,6 +306,20 @@ export const useShoppingList = (list: string, viewer: string) => {
 
     const refresh = () => { if (document.visibilityState !== 'hidden') void retry().then(() => loadItems()); };
     const storage = (event: StorageEvent) => { if (event.key?.startsWith('undo_stack_v2:')) undoStackRef.current = readUndoStack(list); if (event.key?.startsWith('mutation_v3:')) { handleQueueChange(); if (!queuedMutationCount()) void loadItems(); } };
+    const localChange = (event: Event) => {
+      if (!mounted.current || sessionKey() !== session.current) return;
+      const detail=(event as CustomEvent<{keys:string[];remote:boolean}>).detail;
+      if (detail.keys.includes(undoKey(list))) undoStackRef.current=readUndoStack(list);
+      if (detail.remote || detail.keys.some(key=>key.startsWith('list_snapshot_v2:'))) {
+        const snapshot=readSnapshot(list);
+        if (snapshot && (detail.remote || snapshot.dirty) && !sameList(itemsRef.current,snapshot.items)) applyItems(()=>snapshot.items);
+        if (snapshot?.confirmedAt) setLastSyncedAt(snapshot.confirmedAt);
+      }
+      if (detail.keys.some(key=>key.startsWith('mutation_v3:'))) handleQueueChange();
+      if (detail.remote && detail.keys.some(key=>key.startsWith('mutation_v3:')) && !queuedMutationCount() && navigator.onLine) void loadItems();
+    };
+    const poll=setInterval(()=>{ if(navigator.onLine && document.visibilityState!=='hidden') void loadItems(); },30000);
+    window.addEventListener(LOCAL_STORE_CHANGED,localChange);
     window.addEventListener('focus', refresh);
     window.addEventListener('pageshow', refresh);
     document.addEventListener('visibilitychange', refresh);
@@ -301,6 +330,8 @@ export const useShoppingList = (list: string, viewer: string) => {
 
     return () => {
       disposed = true;
+      clearInterval(poll);
+      window.removeEventListener(LOCAL_STORE_CHANGED,localChange);
       clearTimeout(retryTimer);
       clearTimeout(reconnectTimer);
       window.removeEventListener('focus', refresh);
@@ -313,7 +344,7 @@ export const useShoppingList = (list: string, viewer: string) => {
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener(QUEUE_CHANGED_EVENT, handleQueueChange);
     };
-  }, [loadItems, runSync, list]);
+  }, [loadItems, runSync, list, applyItems]);
 
   // ---- raw operations: optimistic update + request, no undo recording ----
 
@@ -325,13 +356,16 @@ export const useShoppingList = (list: string, viewer: string) => {
       try {
         await createItem(item);
         return true;
-      } catch {
+      } catch (error) {
+        if (!(error instanceof ApiError)) storageFailed();
+        const durable = readSnapshot(list);
+        applyItems(() => durable?.items ?? []);
         toast.error(tRef.current('addFailed', { name: item.name }));
         loadItems();
         return false;
       }
     },
-    [applyItems, loadItems],
+    [list, applyItems, loadItems],
   );
 
   const applyRemove = useCallback(
@@ -344,7 +378,10 @@ export const useShoppingList = (list: string, viewer: string) => {
       try {
         await deleteItem(id, list, expected);
         return true;
-      } catch {
+      } catch (error) {
+        if (!(error instanceof ApiError)) storageFailed();
+        const durable = readSnapshot(list);
+        applyItems(() => durable?.items ?? []);
         await loadItems();
         return false;
       }
@@ -371,7 +408,10 @@ export const useShoppingList = (list: string, viewer: string) => {
       try {
         await changeItemCount(id, list, delta, before.unit ?? null);
         return true;
-      } catch {
+      } catch (error) {
+        if (!(error instanceof ApiError)) storageFailed();
+        const durable = readSnapshot(list);
+        applyItems(() => durable?.items ?? []);
         loadItems();
         return false;
       }
@@ -389,7 +429,10 @@ export const useShoppingList = (list: string, viewer: string) => {
       try {
         await setItemBought(id, list, bought, expected);
         return true;
-      } catch {
+      } catch (error) {
+        if (!(error instanceof ApiError)) storageFailed();
+        const durable = readSnapshot(list);
+        applyItems(() => durable?.items ?? []);
         loadItems();
         return false;
       }
@@ -404,7 +447,10 @@ export const useShoppingList = (list: string, viewer: string) => {
       try {
         await updateItemRequest(id, list, edit, expected);
         return true;
-      } catch {
+      } catch (error) {
+        if (!(error instanceof ApiError)) storageFailed();
+        const durable = readSnapshot(list);
+        applyItems(() => durable?.items ?? []);
         if (previous) applyItems((prev) => prev.map((item) => item.id === id ? previous : item));
         await loadItems();
         return false;
@@ -433,7 +479,10 @@ export const useShoppingList = (list: string, viewer: string) => {
       try {
         await reorderItems(list, ids);
         return true;
-      } catch {
+      } catch (error) {
+        if (!(error instanceof ApiError)) storageFailed();
+        const durable = readSnapshot(list);
+        applyItems(() => durable?.items ?? []);
         await loadItems();
         return false;
       }
@@ -452,9 +501,9 @@ export const useShoppingList = (list: string, viewer: string) => {
       if (!appliedDelta) return;
       if (!await applyCount(id, appliedDelta)) return false;
       if (next <= 0) {
-        pushUndo(item.name, { kind: 'restoreItems', items: [{ ...item }] }, group);
+        await pushUndo(item.name, { kind: 'restoreItems', items: [{ ...item }] }, group);
       } else {
-        pushUndo(item.name, { kind: 'changeCount', id, delta: -appliedDelta, unit: item.unit ?? null }, group);
+        await pushUndo(item.name, { kind: 'changeCount', id, delta: -appliedDelta, unit: item.unit ?? null }, group);
       }
       return true;
     },
@@ -485,7 +534,7 @@ export const useShoppingList = (list: string, viewer: string) => {
           // Re-adding something already checked off puts it back on the list.
           const edit = { count: convertQuantity(count, unit, existing.unit)!, bought: false };
           if (!await applyEdit(existing.id, edit, itemExpectation(existing))) return undefined;
-          pushUndo(existing.name, { kind: 'editItem', id: existing.id, edit: { count: existing.count, bought: true }, expected: itemExpectation({ ...existing, ...edit }) }, group);
+          await pushUndo(existing.name, { kind: 'editItem', id: existing.id, edit: { count: existing.count, bought: true }, expected: itemExpectation({ ...existing, ...edit }) }, group);
           return itemsRef.current.find(item => item.id === existing.id);
         }
         return await changeCount(existing.id, convertQuantity(count, unit, existing.unit)!, group)
@@ -503,7 +552,7 @@ export const useShoppingList = (list: string, viewer: string) => {
         bought_at: null,
       };
       if (!await applyAdd(newItem)) return undefined;
-      pushUndo(trimmed, { kind: 'removeItem', id: newItem.id, expected: itemExpectation(newItem) }, group);
+      await pushUndo(trimmed, { kind: 'removeItem', id: newItem.id, expected: itemExpectation(newItem) }, group);
       return itemsRef.current.find(item => item.id === newItem.id);
     },
     [list, changeCount, applyAdd, applyEdit, pushUndo],
@@ -548,7 +597,7 @@ export const useShoppingList = (list: string, viewer: string) => {
       if (next.count !== undefined || next.unit !== undefined) { previous.count = item.count; previous.unit = item.unit ?? null; }
 
       if (!await applyEdit(id, next, itemExpectation(expected ?? item))) return false;
-      pushUndo(item.name, { kind: 'editItem', id, edit: previous, expected: itemExpectation({ ...item, ...next }) }, group);
+      await pushUndo(item.name, { kind: 'editItem', id, edit: previous, expected: itemExpectation({ ...item, ...next }) }, group);
       return true;
     },
     [applyEdit, pushUndo],
@@ -561,8 +610,7 @@ export const useShoppingList = (list: string, viewer: string) => {
     const target = to === list ? itemsRef.current : (readSnapshot(to)?.items ?? []);
     const sourceNext = source.filter((entry) => entry.id !== item.id);
     const targetNext = [...target.filter((entry) => entry.id !== item.id), moved];
-    writeSnapshot(from, sourceNext);
-    writeSnapshot(to, targetNext);
+
     applyItems(() => list === from ? sourceNext : targetNext);
     return moved;
   }, [list, applyItems]);
@@ -572,7 +620,7 @@ export const useShoppingList = (list: string, viewer: string) => {
     if (!item || destination === list || itemFingerprint(item) !== itemFingerprint(expected)) return false;
     try {
       const moved = await applyMove(item, list, destination, itemExpectation(item));
-      pushUndo(item.name, { kind: 'moveItem', item: moved, from: destination, to: list }, group);
+      await pushUndo(item.name, { kind: 'moveItem', item: moved, from: destination, to: list }, group);
       return true;
     } catch {
       await loadItems();
@@ -585,7 +633,7 @@ export const useShoppingList = (list: string, viewer: string) => {
       const item = itemsRef.current.find((i) => i.id === id);
       if (!item || item.bought === bought) return;
       if (!await applyBought(id, bought)) return false;
-      pushUndo(item.name, { kind: 'setBought', id, bought: !bought, expected: itemExpectation({ ...item, bought }) }, group);
+      await pushUndo(item.name, { kind: 'setBought', id, bought: !bought, expected: itemExpectation({ ...item, bought }) }, group);
       return true;
     },
     [applyBought, pushUndo],
@@ -605,7 +653,7 @@ export const useShoppingList = (list: string, viewer: string) => {
       const before = itemsRef.current.filter((item) => !item.bought).map((item) => item.id);
       if (before.length === ids.length && before.every((id, i) => id === ids[i])) return;
       if (!await applyOrder(ids)) { toast.error(tRef.current('voiceChangeFailed')); return false; }
-      pushUndo(tRef.current('orderLabel'), { kind: 'reorder', ids: before });
+      await pushUndo(tRef.current('orderLabel'), { kind: 'reorder', ids: before });
       return true;
     },
     [applyOrder, pushUndo],
@@ -619,9 +667,12 @@ export const useShoppingList = (list: string, viewer: string) => {
     try {
       await clearBoughtItems(list, boughtItems.map(item => item.id));
       if (deletedVisibleRef.current) void loadDeleted();
-      return pushUndo(`${tRef.current('bought')} (${boughtItems.length})`, { kind: 'restoreItems', items: boughtItems }, group);
-    } catch {
-      loadItems();
+      return await pushUndo(`${tRef.current('bought')} (${boughtItems.length})`, { kind: 'restoreItems', items: boughtItems }, group);
+    } catch (error) {
+      if (!(error instanceof ApiError)) storageFailed();
+      applyItems(() => readSnapshot(list)?.items ?? []);
+      await loadItems();
+      return undefined;
     }
   }, [list, applyItems, loadItems, loadDeleted, pushUndo]);
 
@@ -638,8 +689,8 @@ export const useShoppingList = (list: string, viewer: string) => {
         ]);
       }
       try {
-        await restoreItemRequest(id, list);
-        if (item) pushUndo(item.name, { kind: 'removeItem', id, expected: itemExpectation({ ...item, bought: false }) });
+        await restoreItemRequest(id, list, item);
+        if (item) await pushUndo(item.name, { kind: 'removeItem', id, expected: itemExpectation({ ...item, bought: false }) });
         return true;
       } catch {
         loadItems();
@@ -664,18 +715,18 @@ export const useShoppingList = (list: string, viewer: string) => {
   // ---- undo ----
 
   const runUndoAction = useCallback(
-    async function run(action: UndoAction, progress: (remaining: UndoAction) => void = () => {}): Promise<boolean> {
+    async function run(action: UndoAction, progress: (remaining: UndoAction) => Promise<void> | void = () => {}): Promise<boolean> {
       switch (action.kind) {
         case 'group': {
           const remaining = [...action.entries];
           while (remaining.length) {
             const entry = remaining[remaining.length - 1];
-            if (!await run(entry.action, action => {
+            if (!await run(entry.action, async action => {
               remaining[remaining.length - 1] = { ...entry, action };
-              progress({ kind: 'group', entries: [...remaining] });
+              await progress({ kind: 'group', entries: [...remaining] });
             })) return false;
             remaining.pop();
-            progress({ kind: 'group', entries: [...remaining] });
+            await progress({ kind: 'group', entries: [...remaining] });
           }
           return true;
         }
@@ -686,7 +737,7 @@ export const useShoppingList = (list: string, viewer: string) => {
           // the order it was in, and each POST assigns the next position.
           for (let index = 0; index < action.items.length; index++) {
             if (!await applyAdd(action.items[index])) return false;
-            progress({ kind: 'restoreItems', items: action.items.slice(index + 1) });
+            await progress({ kind: 'restoreItems', items: action.items.slice(index + 1) });
           }
           return true;
         case 'changeCount':
@@ -731,17 +782,17 @@ export const useShoppingList = (list: string, viewer: string) => {
       if (index < 0) return null;
       const entry = undoStackRef.current[index];
       if (activeGroups.current.has(entry.id)) throw new Error('Phrase is still being applied');
-      const removeEntry = () => {
-        undoStackRef.current = readUndoStack(list).filter(candidate => candidate.id !== entry.id);
-        writeUndoStack(list, undoStackRef.current);
+      const removeEntry = async () => {
+        await updateUndoStack(list, stack => stack.filter(candidate => candidate.id !== entry.id));
+        undoStackRef.current = readUndoStack(list);
       };
-      if (!isApplicable(entry.action)) { removeEntry(); if (actionId) return null; continue; }
-      const result = await runUndoAction(entry.action, action => {
-        undoStackRef.current = readUndoStack(list).map(candidate => candidate.id === entry.id ? { ...candidate, action } : candidate);
-        writeUndoStack(list, undoStackRef.current);
+      if (!isApplicable(entry.action)) { await removeEntry(); if (actionId) return null; continue; }
+      const result = await runUndoAction(entry.action, async action => {
+        await updateUndoStack(list, stack => stack.map(candidate => candidate.id === entry.id ? { ...candidate, action } : candidate));
+        undoStackRef.current = readUndoStack(list);
       });
       if (result === false) throw new Error('Undo failed');
-      removeEntry();
+      await removeEntry();
       return entry.label;
     }
     return null;
@@ -754,6 +805,7 @@ export const useShoppingList = (list: string, viewer: string) => {
     deletedItems,
     otherViewers,
     isOffline,
+    lastSyncedAt,
     pendingCount,
     accessDenied, loading, loadError, deletedError, deletedLoading, failedCount,
     retrySync: () => runSync().then(() => loadItems()),

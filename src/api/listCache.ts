@@ -1,4 +1,5 @@
 import { getAccountId, getToken } from './client';
+import { readLocal, transactLocal, writeLocal } from './localStore';
 import { Item } from './items';
 
 /**
@@ -9,17 +10,21 @@ import { Item } from './items';
 const KEY_PREFIX = 'list_snapshot_v2:';
 
 
-const key = (list: string) => `${KEY_PREFIX}${getAccountId()}:${list}`;
+export const snapshotKey = (list: string, account = getAccountId()) => `${KEY_PREFIX}${account}:${list}`;
+const key = snapshotKey;
 
 export type Snapshot = {
   items: Item[];
   savedAt: number;
+  version?: number;
+  confirmedAt?: number;
+  dirty?: boolean;
 };
 
 export const readSnapshot = (list: string): Snapshot | null => {
   try {
     const legacy = getToken() && localStorage.getItem('username') && getAccountId().startsWith('legacy:');
-    const raw = localStorage.getItem(key(list)) ?? (legacy ? localStorage.getItem(`list_snapshot_v1:${list}`) : null);
+    const raw = readLocal(key(list)) ?? (legacy ? localStorage.getItem(`list_snapshot_v1:${list}`) : null);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.items)) return null;
@@ -30,26 +35,37 @@ export const readSnapshot = (list: string): Snapshot | null => {
       ...item,
       list_id: item.list_id ?? item.username ?? list,
     }));
-    return { items, savedAt: Number(parsed.savedAt) || 0 };
+    return { ...parsed, items, savedAt: Number(parsed.savedAt) || 0 };
   } catch {
     return null;
   }
 };
 
-export const writeSnapshot = (list: string, items: Item[]) => {
-  try {
-    const payload: Snapshot = { items: items, savedAt: Date.now() };
-    localStorage.setItem(key(list), JSON.stringify(payload));
-  } catch {
-    // Quota exceeded or storage disabled — the cache is an optimisation, not a
-    // requirement, so a failure here must not break the mutation that caused it.
-  }
+export const writeSnapshot = (list: string, items: Item[], metadata: Partial<Omit<Snapshot,'items'|'savedAt'>> = {}) => {
+  const account=getAccountId();
+  const name=snapshotKey(list,account);
+  return transactLocal(records => {
+    if (metadata.confirmedAt) {
+      const pending=[...records.entries()].some(([key,value])=> {
+        if (!key.startsWith(`mutation_v3:${account}:`)) return false;
+        let entry;
+        try { entry=JSON.parse(value); } catch { return false; }
+        if (!entry || typeof entry.url !== 'string') return false;
+        if (entry.failure) return false;
+        const url=new URL(entry.url,location.origin);
+        return [entry.body?.list,entry.body?.username,entry.body?.destination,url.searchParams.get('list')].includes(list);
+      });
+      if (pending) return {result:false,changes:[]};
+    }
+    let previous: Partial<Snapshot> | null = null;
+    try { previous=JSON.parse(records.get(name) ?? 'null'); } catch { /* A fresh server snapshot repairs a damaged cache. */ }
+    if (metadata.version !== undefined && previous?.version !== undefined && previous.version > metadata.version) return {result:false,changes:[]};
+    return {result:true,changes:[[name,JSON.stringify({ ...metadata, items, savedAt:Date.now() })]]};
+  });
 };
 
-export const removeSnapshot = (list: string) => localStorage.removeItem(key(list));
-
+export const removeSnapshot = (list: string) => writeLocal(key(list),null);
 export const clearSnapshots = () => {
-  for (const name of Object.keys(localStorage)) {
-    if (name.startsWith(`${KEY_PREFIX}${getAccountId()}:`) || name.startsWith('list_snapshot_v1:')) localStorage.removeItem(name);
-  }
+  const prefix=`${KEY_PREFIX}${getAccountId()}:`;
+  return transactLocal(records=>({result:undefined,changes:[...records.keys()].filter(key=>key.startsWith(prefix)).map(key=>[key,null])}));
 };

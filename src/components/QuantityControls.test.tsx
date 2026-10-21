@@ -13,7 +13,7 @@ describe('quick quantity editing', () => {
     fireEvent.click(screen.getByText('Сохранить'));
     await waitFor(() => expect(edit).toHaveBeenCalledWith('i',{count:0.25},item));
     expect(screen.getByRole('textbox')).toHaveProperty('value','0,25');
-    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(await screen.findByRole('alert')).toBeTruthy();
     expect(close).not.toHaveBeenCalled();
   });
   it('applies steps immediately and labels the zero step as removal', () => {

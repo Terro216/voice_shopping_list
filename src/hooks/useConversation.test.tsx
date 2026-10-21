@@ -27,7 +27,7 @@ beforeEach(() => {
     const body = init?.body ? JSON.parse(String(init.body)) : {};
     const method = init?.method ?? 'GET';
     const id = decodeURIComponent(url.pathname.split('/')[3] ?? '');
-    if (method === 'GET') return json(rows.filter((item) => item.list_id === url.searchParams.get('list')));
+    if (method === 'GET') { const items=rows.filter(item => item.list_id === url.searchParams.get('list')); return json(url.pathname==='/api/items/sync'?{version:0,items}:items); }
     if (method === 'POST' && url.pathname.endsWith('/move')) {
       rows = rows.map((item) => item.id === id ? { ...item, list_id: body.destination } : item);
       return json(rows.find((item) => item.id === id));
@@ -61,6 +61,7 @@ const mount = async (catalog = lists) => {
     });
     return { ...shopping, ...conversation };
   }, { initialProps: { list: 'ann' } });
+  await waitFor(() => expect(view.result.current.loading).toBe(false));
   await waitFor(() => expect(view.result.current.items).toHaveLength(rows.filter((item) => item.list_id === 'ann').length));
   const say = async (text: string) => { await act(async () => { await view.result.current.handleSpeech(text); }); };
   return { ...view, say };

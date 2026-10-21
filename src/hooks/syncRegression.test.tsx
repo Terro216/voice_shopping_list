@@ -1,3 +1,4 @@
+import { IDBObjectStore } from 'fake-indexeddb';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { useShoppingList } from './useShoppingList';
@@ -16,7 +17,7 @@ const serve = async (url: string | URL | Request, init?: RequestInit) => {
   const method = init?.method ?? 'GET';
   const body = init?.body ? JSON.parse(String(init.body)) : {};
   const id = path.split('/')[3];
-  if (method === 'GET') return response(rows);
+  if (method === 'GET') return response(path === '/api/items/sync' ? {version:0,items:rows} : rows);
   if (method === 'POST') rows = [...rows.filter(item => item.id !== body.id), { ...body, list_id: body.list }];
   if (method === 'DELETE') rows = rows.filter(item => item.id !== id);
   if (method === 'PATCH') rows = rows.map(item => item.id === id ? { ...item, ...body, ...(body.delta ? { count: item.count + body.delta } : {}) } : item);
@@ -33,7 +34,7 @@ describe('shopping data regressions', () => {
     vi.mocked(fetch).mockImplementationOnce(() => first);
     const { result } = renderHook(() => useShoppingList('ann', 'ann'));
     await act(async () => { await result.current.addItem('молоко'); });
-    await act(async () => { release(response([])); });
+    await act(async () => { release(response({version:0,items:[]})); });
     expect(result.current.items.map(item => item.name)).toEqual(['молоко']);
     expect(readSnapshot('ann')?.items).toHaveLength(1);
   });
@@ -79,8 +80,19 @@ describe('shopping data regressions', () => {
     expect(result.current.items.map(item => item.id)).toEqual(['bread']);
   });
 
+  it('does not repeat a successful add when only saving undo fails',async()=>{
+    const {result}=await mount();
+    const put=IDBObjectStore.prototype.put;
+    const spy=vi.spyOn(IDBObjectStore.prototype,'put').mockImplementation(function(this:IDBObjectStore,value:unknown,...args:[IDBValidKey?]) {
+      if((value as {key:string}).key.startsWith('undo_stack_v2:')) throw new DOMException('Full','QuotaExceededError');
+      return put.call(this,value,...args);
+    });
+    await act(async()=>{expect(await result.current.addItem('milk')).toMatchObject({name:'milk'});});
+    expect(rows).toHaveLength(1);expect(readSnapshot('ann')?.items).toHaveLength(1);spy.mockRestore();
+  });
+
   it('restarts a stalled queue on socket reconnect', async () => {
-    enqueueMutation({ url: '/api/items', method: 'POST', body: { id: 'milk', name: 'milk', count: 1, list: 'ann', bought: false } });
+    await enqueueMutation({ url: '/api/items', method: 'POST', body: { id: 'milk', name: 'milk', count: 1, list: 'ann', bought: false } });
     vi.mocked(fetch).mockRejectedValue(new TypeError('offline'));
     renderHook(() => useShoppingList('ann', 'ann'));
     await waitFor(() => expect(fetch).toHaveBeenCalled());

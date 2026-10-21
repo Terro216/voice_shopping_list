@@ -7,7 +7,8 @@ import { ApiError, AUTH_EXPIRED_EVENT, RATE_LIMITED_EVENT, CATALOG_CHANGED_EVENT
 import { fetchLists, joinList, type ListSummary } from './api/lists';
 import { clearSnapshots } from './api/listCache';
 import { readCatalog, writeCatalog, clearCatalog } from './api/catalogCache';
-import { queuedMutationCount } from './api/offlineQueue';
+import { readMutations } from './api/offlineQueue';
+import { storageFailed, LOCAL_STORE_CHANGED } from './api/localStore';
 import { clearUndoStacks } from './api/undoStack';
 import { useTheme } from './hooks/useTheme';
 import { watchForUpdates } from './pwa';
@@ -115,7 +116,7 @@ function App() {
     // The cached lists are somebody's shopping habits — they should not sit in
     // storage for whoever logs in on this device next. Same for the undo stacks,
     // which quote item names.
-    if (!preserveInvite && queuedMutationCount() === 0) { clearSnapshots(); clearUndoStacks(); clearCatalog(); }
+    if (!preserveInvite && readMutations().length === 0) { void Promise.all([clearSnapshots(), clearUndoStacks(), clearCatalog()]).catch(storageFailed); }
     localStorage.setItem('session_generation', crypto.randomUUID());
     localStorage.removeItem('username');
     localStorage.removeItem('token');
@@ -135,10 +136,10 @@ function App() {
     const requestId = ++catalogRequest.current;
     setCatalogLoading(true);
     return fetchLists()
-      .then((data) => {
+      .then(async (data) => {
         if (sessionKey() !== requestedSession || requestId !== catalogRequest.current) return;
         setLists(data);
-        writeCatalog(data);
+        await writeCatalog(data);
         setCatalogError(false);
       })
       .catch(() => { if (sessionKey() === requestedSession && requestId === catalogRequest.current) setCatalogError(true); })
@@ -156,12 +157,15 @@ function App() {
     const storage = (event: StorageEvent) => {
       if (event.key === 'token' || event.key === 'username' || event.key === 'session_generation') changed();
     };
+    const local = (event: Event) => { if ((event as CustomEvent<{keys:string[]}>).detail.keys.includes(`list_catalog_v1:${getAccountId()}`)) setLists(readCatalog()); };
+    window.addEventListener(LOCAL_STORE_CHANGED, local);
     window.addEventListener('storage', storage);
     window.addEventListener(CATALOG_CHANGED_EVENT, refresh);
     window.addEventListener(SESSION_CHANGED_EVENT, changed);
     window.addEventListener('focus', refresh);
     window.addEventListener('online', refresh);
     return () => {
+      window.removeEventListener(LOCAL_STORE_CHANGED, local);
       window.removeEventListener('storage', storage);
       window.removeEventListener(CATALOG_CHANGED_EVENT, refresh);
       window.removeEventListener(SESSION_CHANGED_EVENT, changed);

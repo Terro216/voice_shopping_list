@@ -103,8 +103,16 @@ try {
   r = await api(`/api/items?list=${user}`, { token });
   check('items with token → empty list', r.status === 200 && Array.isArray(r.data) && r.data.length === 0, JSON.stringify(r));
 
+  const initialVersion=(await api(`/api/items/sync?list=${user}`,{token})).data.version;
+  check('new list starts at revision zero',initialVersion===0);
+  check('sync requires authentication',(await api(`/api/items/sync?list=${user}`)).status===401);
+  check('invalid sync version is rejected',(await api(`/api/items/sync?list=${user}&since=-1`,{token})).status===400);
   r = await api('/api/items', { method: 'POST', token, body: { id: 'item-1', name: '  молоко  ', count: 2, list: user } });
   check('add item → 201', r.status === 201, JSON.stringify(r));
+  const afterAdd=await api(`/api/items/sync?list=${user}&since=${initialVersion}`,{token});
+  check('version and full snapshot change together',afterAdd.data.version>initialVersion && afterAdd.data.items[0].id==='item-1');
+  const unchanged=await api(`/api/items/sync?list=${user}&since=${afterAdd.data.version}`,{token});
+  check('unchanged version avoids transferring rows',unchanged.data.items===null && unchanged.headers.get('cache-control')==='no-store');
 
   r = await api('/api/items', { method: 'POST', token, body: { id: 'item-1', name: 'молоко', count: 2, list: user } });
   check('replayed add (same id) tolerated → 200', r.status === 200 && r.data.success, JSON.stringify(r));
@@ -549,7 +557,10 @@ try {
   check('a stale move is rejected → 409', r.status === 409);
   r = await api(`/api/items?list=${user}`, { token });
   check('failed moves leave the source intact', r.data?.some(item => item.id === correctionItem.id && item.count === 3 && item.name === 'молоко'));
+  const moveBefore=await Promise.all([user,dacha.id].map(async list=>(await api(`/api/items/sync?list=${list}`,{token})).data.version));
   r = await api('/api/items/voice-milk/move', { method: 'POST', token, body: transfer });
+  const moveAfter=await Promise.all([user,dacha.id].map(async list=>(await api(`/api/items/sync?list=${list}`,{token})).data.version));
+  check('moving advances both list revisions',moveAfter.every((version,index)=>version>moveBefore[index]));
   check('a move preserves id, quantity, unit and note', r.status === 200 && r.data?.id === correctionItem.id && r.data?.list_id === dacha.id && r.data?.count === 3 && r.data?.unit === 'l' && r.data?.note === expected.note, JSON.stringify(r));
   r = await api('/api/items/voice-milk/move', { method: 'POST', token, body: transfer });
   check('replaying a move succeeds without duplicating', r.status === 200);
@@ -615,7 +626,7 @@ try {
       body: JSON.stringify({ id: 'sock-1', name: 'сокет', list: user }),
     });
     const payload = await updateSeen;
-    check('list_updated reaches the room with its actor', payload?.actor === 'smoke-client', JSON.stringify(payload));
+    check('list_updated reaches the room with actor and version', payload?.actor === 'smoke-client' && Number.isSafeInteger(payload?.version), JSON.stringify(payload));
 
     // Joining a list this account has no access to must be silently ignored.
     const strangerSocket = await openSocket({ token: otherToken });
@@ -635,14 +646,17 @@ try {
   // Receipts commit atomically with the operation: ambiguous delivery is safe.
   const replayBody = { list: user, delta: 1 };
   await api('/api/items', { method: 'POST', token, body: { id: 'receipt-item', name: 'receipt fixture', count: 1, list: user } });
+  const receiptVersion=(await api(`/api/items/sync?list=${user}`,{token})).data.version;
   for (let attempt = 0; attempt < 3; attempt++) {
     r = await api('/api/items/receipt-item/count', { method: 'PATCH', token, body: replayBody, mutationId: 'count-receipt-001' });
     check(`same mutation replay ${attempt + 1}`, r.status === 200);
   }
   r = await api(`/api/items?list=${user}`, { token });
+  check('receipt replays increment revision only once',(await api(`/api/items/sync?list=${user}`,{token})).data.version===receiptVersion+1);
   check('three deliveries apply delta once', r.data.find(item => item.id === 'receipt-item')?.count === 2);
   r = await api('/api/items/receipt-item/count', { method: 'PATCH', token, body: { ...replayBody, delta: 2 }, mutationId: 'count-receipt-001' });
   check('mutation id cannot be reused for different content', r.status === 409);
+  check('rejected writes do not advance revision',(await api(`/api/items/sync?list=${user}`,{token})).data.version===receiptVersion+1);
   for (const id of ['clear-seen', 'clear-unseen']) await api('/api/items', { method: 'POST', token, body: { id, name: id, bought: true, list: user } });
   await api(`/api/items/bought?list=${user}`, { method: 'DELETE', token, body: { ids: ['clear-seen'] }, mutationId: 'clear-receipt-001' });
   r = await api(`/api/items?list=${user}`, { token });

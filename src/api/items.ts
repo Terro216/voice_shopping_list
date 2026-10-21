@@ -47,6 +47,10 @@ export const generateItemId = () =>
 export const fetchItems = (list: string): Promise<Item[]> =>
   request<Item[]>(`/api/items?list=${encodeURIComponent(list)}`);
 
+export type ListSync = {version:number;items:Item[] | null};
+export const fetchListSync = (list:string, since?:number): Promise<ListSync> =>
+  request<ListSync>(`/api/items/sync?list=${encodeURIComponent(list)}${since===undefined?'':`&since=${since}`}`);
+
 export const fetchSuggestions = (list: string, q = ''): Promise<Suggestion[]> =>
   request<Suggestion[]>(
     `/api/items/suggestions?list=${encodeURIComponent(list)}&q=${encodeURIComponent(q)}`,
@@ -85,8 +89,8 @@ export const deleteItem = (id: string, list: string, expected?: ItemExpectation)
 export const fetchDeletedItems = (list: string): Promise<Item[]> =>
   request<Item[]>(`/api/items/deleted?list=${encodeURIComponent(list)}`);
 
-export const restoreItem = (id: string, list: string): Promise<void> =>
-  sendOrQueue(`/api/items/${encodeURIComponent(id)}/restore`, 'POST', { list });
+export const restoreItem = (id: string, list: string, item?: Item): Promise<void> =>
+  sendOrQueue(`/api/items/${encodeURIComponent(id)}/restore`, 'POST', { list }, item);
 
 export const purgeDeletedItems = (list: string, ids: string[]): Promise<void> =>
   sendOrQueue(`/api/items/deleted?list=${encodeURIComponent(list)}`, 'DELETE', { ids });

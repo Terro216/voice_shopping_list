@@ -1,6 +1,7 @@
 import express from "express";
 import {
   getItems,
+  getSync,
   getDeletedItems,
   getSuggestions,
   addItem,
@@ -24,6 +25,7 @@ const router = express.Router();
 router.use(verifyToken);
 
 router.get("/", readLimiter, requireListAccess, getItems);
+router.get("/sync", readLimiter, requireListAccess, getSync);
 router.get("/suggestions", readLimiter, requireListAccess, getSuggestions);
 router.get("/deleted", readLimiter, requireListAccess, getDeletedItems);
 router.post("/", writeLimiter, requireListAccess, mutation(addItem));

@@ -5,6 +5,22 @@ Express 5 + SQLite (better-sqlite3) + Socket.IO on the backend.
 
 [Исправления по ревью](docs/review-fixes.md) · [Предложения по развитию](docs/improvements.md)
 
+The October 2026 UX update keeps the list first: quantity controls expand on tap,
+reordering is a separate menu action, bought items collapse, and the composer
+stays near the bottom above the keyboard. The last voice phrase keeps its applied
+results; one undo reverses its successful actions, and an import also forms one group.
+
+Local snapshots, the operation queue, undo and the last voice result now live in
+IndexedDB. Queuing an operation and updating the local snapshot is one transaction.
+Existing account-bound records migrate from localStorage only after commit; an
+unowned legacy queue still requires manual review. The server exposes list revisions
+through `GET /api/items/sync?list=…&since=…`; triggers advance the revision in the
+same SQLite transaction as item changes. Socket events carry the revision, and a
+visible online list checks every 30 seconds to recover missed events. The UI shows
+the last confirmed server check and lets rejected changes be reviewed against the
+current item before sending a new operation ID. Migration 010 is additive and does
+not invalidate current sessions.
+
 ## Features
 
 - **Voice input** (Web Speech API, Russian/English): "добавь молоко и 2 хлеба" →

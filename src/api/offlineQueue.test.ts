@@ -20,8 +20,8 @@ describe('offlineQueue', () => {
 
   it('replays queued mutations in order with current auth headers', async () => {
     localStorage.setItem('token', 'fresh-token');
-    enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '1' } });
-    enqueueMutation({ url: '/api/items/1/count', method: 'PATCH', body: { delta: 1 } });
+    await enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '1' } });
+    await enqueueMutation({ url: '/api/items/1/count', method: 'PATCH', body: { delta: 1 } });
 
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200));
     vi.stubGlobal('fetch', fetchMock);
@@ -38,7 +38,7 @@ describe('offlineQueue', () => {
   });
 
   it('drops a mutation the server rejected for good', async () => {
-    enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '1' } });
+    await enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '1' } });
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(400)));
     const result = await syncOfflineQueue();
@@ -48,13 +48,13 @@ describe('offlineQueue', () => {
   });
 
   it('keeps a correction appended while its preceding add is being replayed', async () => {
-    enqueueMutation({ url: '/api/items', method: 'POST', body: { id: 'milk' } });
+    await enqueueMutation({ url: '/api/items', method: 'POST', body: { id: 'milk' } });
     let release!: (response: Response) => void;
     const first = new Promise<Response>((resolve) => { release = resolve; });
     const fetchMock = vi.fn().mockReturnValueOnce(first).mockResolvedValue(jsonResponse(200));
     vi.stubGlobal('fetch', fetchMock);
     const syncing = syncOfflineQueue();
-    enqueueMutation({ url: '/api/items/milk', method: 'PATCH', body: { count: 3 } });
+    await enqueueMutation({ url: '/api/items/milk', method: 'PATCH', body: { count: 3 } });
     release(jsonResponse(200));
     expect(await syncing).toEqual({ sent: 2, rejected: 0, remaining: 0 });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/items', '/api/items/milk']);
@@ -62,8 +62,8 @@ describe('offlineQueue', () => {
 
   it('preserves measured item payloads and rejects a stale unit delta on replay', async () => {
     const body = { id: 'measured', name: 'молоко', list: 'ann', count: 1.5, unit: 'l', note: 'Безлактозное' };
-    enqueueMutation({ url: '/api/items', method: 'POST', body });
-    enqueueMutation({ url: '/api/items/measured/count', method: 'PATCH', body: { list: 'ann', delta: 0.1, expectedUnit: 'l' } });
+    await enqueueMutation({ url: '/api/items', method: 'POST', body });
+    await enqueueMutation({ url: '/api/items/measured/count', method: 'PATCH', body: { list: 'ann', delta: 0.1, expectedUnit: 'l' } });
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200)).mockResolvedValueOnce(jsonResponse(409));
     vi.stubGlobal('fetch', fetchMock);
     expect(await syncOfflineQueue()).toEqual({ sent: 1, rejected: 1, remaining: 0 });
@@ -72,8 +72,8 @@ describe('offlineQueue', () => {
   });
 
   it('keeps a rate-limited mutation queued for the next attempt', async () => {
-    enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '1' } });
-    enqueueMutation({ url: '/api/items/1/count', method: 'PATCH', body: { delta: 1 } });
+    await enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '1' } });
+    await enqueueMutation({ url: '/api/items/1/count', method: 'PATCH', body: { delta: 1 } });
 
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(429));
     vi.stubGlobal('fetch', fetchMock);
@@ -86,7 +86,7 @@ describe('offlineQueue', () => {
   });
 
   it('keeps a server error queued rather than losing the change', async () => {
-    enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '1' } });
+    await enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '1' } });
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(503)));
     const result = await syncOfflineQueue();
@@ -97,8 +97,8 @@ describe('offlineQueue', () => {
 
   it('keeps everything and signals an expired session on 401', async () => {
     localStorage.setItem('token', 'stale-token');
-    enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '1' } });
-    enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '2' } });
+    await enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '1' } });
+    await enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '2' } });
 
     const onExpired = vi.fn();
     window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
@@ -114,7 +114,7 @@ describe('offlineQueue', () => {
 
   it('stores a token the server refreshed during the replay', async () => {
     localStorage.setItem('token', 'old-token');
-    enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '1' } });
+    await enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '1' } });
 
     vi.stubGlobal(
       'fetch',
@@ -126,8 +126,8 @@ describe('offlineQueue', () => {
   });
 
   it('keeps the mutation and the rest of the queue on network failure', async () => {
-    enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '1' } });
-    enqueueMutation({ url: '/api/items/1/count', method: 'PATCH', body: { delta: 1 } });
+    await enqueueMutation({ url: '/api/items', method: 'POST', body: { id: '1' } });
+    await enqueueMutation({ url: '/api/items/1/count', method: 'PATCH', body: { delta: 1 } });
 
     const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
     vi.stubGlobal('fetch', fetchMock);

@@ -1,3 +1,4 @@
+import { readLocal, writeLocal, transactLocal } from './localStore';
 import { getAccountId } from './client';
 import { Item, ItemEdit, type ItemExpectation } from './items';
 import type { Unit } from '../../shared/quantity.js';
@@ -8,7 +9,7 @@ import type { Unit } from '../../shared/quantity.js';
  * The stack used to hold functions, which meant it died with the page: closing
  * the app in a shop, or a reload after the phone woke up, silently threw away
  * every safety net. Describing each undo as a plain value lets it be written to
- * localStorage and picked up by the next session.
+ * IndexedDB and picked up by the next session.
  */
 export type UndoAction =
   | { kind: 'group'; entries: UndoEntry[] }
@@ -33,7 +34,7 @@ export const UNDO_STACK_LIMIT = 20;
 
 const KEY_PREFIX = 'undo_stack_v2:';
 
-const key = (list: string) => `${KEY_PREFIX}${getAccountId()}:${list}`;
+export const undoKey = (list: string) => `${KEY_PREFIX}${getAccountId()}:${list}`;
 
 const isEntry = (value: unknown): value is UndoEntry => {
   if (!value || typeof value !== 'object') return false;
@@ -43,25 +44,25 @@ const isEntry = (value: unknown): value is UndoEntry => {
 
 export const readUndoStack = (list: string): UndoEntry[] => {
   try {
-    const parsed = JSON.parse(localStorage.getItem(key(list)) ?? '[]');
+    const parsed = JSON.parse(readLocal(undoKey(list)) ?? '[]');
     return Array.isArray(parsed) ? parsed.filter(isEntry).slice(-UNDO_STACK_LIMIT) : [];
   } catch {
     return [];
   }
 };
 
-export const writeUndoStack = (list: string, stack: UndoEntry[]) => {
-  try {
-    if (stack.length === 0) localStorage.removeItem(key(list));
-    else localStorage.setItem(key(list), JSON.stringify(stack.slice(-UNDO_STACK_LIMIT)));
-  } catch {
-    // Storage full or disabled: undo still works for this session, it just will
-    // not outlive it. Never worth failing the action that is being recorded.
-  }
-};
+export const writeUndoStack = (list: string, stack: UndoEntry[]) => writeLocal(undoKey(list),stack.length ? JSON.stringify(stack.slice(-UNDO_STACK_LIMIT)) : null);
 
 export const clearUndoStacks = () => {
-  for (const name of Object.keys(localStorage)) {
-    if (name.startsWith(`${KEY_PREFIX}${getAccountId()}:`) || name.startsWith('undo_stack_v1:')) localStorage.removeItem(name);
-  }
+  const prefix=`${KEY_PREFIX}${getAccountId()}:`;
+  return transactLocal(records=>({result:undefined,changes:[...records.keys()].filter(key=>key.startsWith(prefix)).map(key=>[key,null])}));
+};
+
+/** Update against the latest committed stack so another tab cannot lose its tail. */
+export const updateUndoStack = (list:string, update:(stack:UndoEntry[])=>UndoEntry[]) => {
+  const key=undoKey(list);
+  return transactLocal(records=>{
+    const stack=update(JSON.parse(records.get(key) ?? '[]') as UndoEntry[]).slice(-UNDO_STACK_LIMIT);
+    return {result:undefined,changes:[[key,stack.length?JSON.stringify(stack):null]]};
+  });
 };

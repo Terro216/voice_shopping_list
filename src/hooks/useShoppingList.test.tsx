@@ -45,11 +45,11 @@ const respond = (url: string, init?: RequestInit) => {
     }
   }
   const data = reading
-    ? path === '/api/items'
+    ? path === '/api/items/sync' ? {version:0,items:served} : path === '/api/items'
       ? served
       : path === '/api/items/deleted' ? deleted : []
     : { ok: true };
-  return { ok: true, status: 200, headers: new Headers(), json: async () => data };
+  return { ok: true, status: 200, headers: new Headers(), json: async () => structuredClone(data) };
 };
 
 const sent = (method: string, match: string) =>
@@ -76,6 +76,7 @@ const mount = () => renderHook(() => useShoppingList(LIST, LIST));
  */
 const mountLoaded = async () => {
   const view = mount();
+  await waitFor(() => expect(view.result.current.loading).toBe(false));
   await waitFor(() => expect(view.result.current.items).toHaveLength(served.length));
   return view;
 };
@@ -213,9 +214,8 @@ describe('useShoppingList deleted drawer', () => {
     });
     expect(sent('GET', '/api/items/deleted')).toHaveLength(0);
 
-    await act(async () => {
-      result.current.watchDeleted(true);
-    });
+    await act(async () => { await result.current.retrySync(); });
+    await act(async () => { result.current.watchDeleted(true); });
     expect(sent('GET', '/api/items/deleted')).toHaveLength(1);
 
     await act(async () => {

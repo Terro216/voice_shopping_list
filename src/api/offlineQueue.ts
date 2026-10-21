@@ -1,8 +1,10 @@
 import { ApiError, getAccountId, request, sessionKey } from './client';
 import { writeSnapshot } from './listCache';
 import type { Item } from './items';
+import { readLocal, localKeys, transactLocal, refreshLocal, type LocalChange } from './localStore';
+import { projectMutation } from './projectMutation';
 
-export type QueuedMutation = { url: string; method: string; body?: unknown };
+export type QueuedMutation = { url: string; method: string; body?: unknown; restoredItem?: Item };
 export type StoredMutation = QueuedMutation & { id: string; account: string; createdAt: number; failure?: { status: number; message: string } };
 export type SyncResult = { sent: number; rejected: number; remaining: number };
 const PREFIX = 'mutation_v3:';
@@ -17,37 +19,37 @@ export const retryDelay = () => Math.max(0, nextAttemptAt - Date.now());
 // One storage key per operation: acknowledging a head never rewrites somebody
 // else's tail. A browser lock serializes senders; server receipts also make a
 // duplicate replay from older browsers harmless.
-export const readMutations = (account = getAccountId()): StoredMutation[] => {
-  const entries: StoredMutation[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const name = localStorage.key(i);
-    if (!name?.startsWith(`${PREFIX}${account}:`)) continue;
+const parseMutations = (records: Iterable<[string,string]>, account: string): StoredMutation[] => {
+  const entries: StoredMutation[]=[];
+  for (const [name,value] of records) {
+    if (!name.startsWith(`${PREFIX}${account}:`)) continue;
     try {
-      const entry = JSON.parse(localStorage.getItem(name) ?? 'null');
-      if (entry?.account === account && typeof entry.id === 'string' && typeof entry.url === 'string') entries.push(entry);
-    } catch { /* A damaged entry is retained for recovery, never sent blindly. */ }
+      const entry=JSON.parse(value);
+      if (entry?.account===account && typeof entry.id==='string' && typeof entry.url==='string') entries.push(entry);
+    } catch { /* Damaged records stay available for recovery. */ }
   }
-  return entries.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+  return entries.sort((a,b)=>a.createdAt-b.createdAt || a.id.localeCompare(b.id));
 };
-export const queuedMutationCount = () => readMutations().filter(entry => !entry.failure).length;
-export const failedMutations = () => readMutations().filter(entry => entry.failure);
-export const discardMutation = (id: string) => {
-  localStorage.removeItem(key({ account: getAccountId(), id }));
-  epoch++;
-  announce();
+export const readMutations = (account=getAccountId()) => parseMutations(localKeys().map(name=>[name,readLocal(name) ?? 'null']),account);
+export const queuedMutationCount = () => readMutations().filter(entry=>!entry.failure).length;
+export const failedMutations = () => readMutations().filter(entry=>entry.failure);
+export const discardMutation = async (id: string) => {
+  const name=key({account:getAccountId(),id});
+  await transactLocal(()=>({result:undefined,changes:[[name,null]]}));
+  epoch++; announce();
 };
 
-export const enqueueMutation = (mutation: QueuedMutation) => {
-  const account = getAccountId();
-  const pending = readMutations(account);
-  const entry: StoredMutation = {
-    ...mutation, account, id: crypto.randomUUID(),
-    createdAt: Math.max(Date.now(), (pending.at(-1)?.createdAt ?? 0) + 1),
-  };
-  // Storage failure must reach the caller: claiming "saved offline" would lose data.
-  localStorage.setItem(key(entry), JSON.stringify(entry));
-  epoch++;
-  announce();
+export const enqueueMutation = async (mutation: QueuedMutation, replacing?: string) => {
+  const account=getAccountId(), session=sessionKey();
+  const entry=await transactLocal(records=>{
+    if (sessionKey()!==session) throw new Error('Session changed');
+    const pending=parseMutations(records,account);
+    if (replacing && !pending.some(entry=>entry.id===replacing && entry.failure)) throw new Error('The rejected change is no longer available');
+    const entry: StoredMutation={...mutation,account,id:crypto.randomUUID(),createdAt:Math.max(Date.now(),(pending.at(-1)?.createdAt ?? 0)+1)};
+    const changes: LocalChange[]=[...(replacing?[[key({account,id:replacing}),null] as LocalChange]:[]),[key(entry),JSON.stringify(entry)],...projectMutation(records,entry)];
+    return {result:entry,changes};
+  });
+  epoch++; announce();
   return entry;
 };
 
@@ -58,6 +60,7 @@ export const syncOfflineQueue = (): Promise<SyncResult> => {
   if (flight?.session === session) return flight.promise;
   const account = getAccountId();
   const replay = async (): Promise<SyncResult> => {
+    await refreshLocal();
     let sent = 0;
     let rejected = 0;
     const movedLists = new Set<string>();
@@ -68,7 +71,7 @@ export const syncOfflineQueue = (): Promise<SyncResult> => {
         await request(entry.url, { method: entry.method, body: entry.body, mutationId: entry.id });
         if (sessionKey() !== session) break;
         // Remove precisely the acknowledged id, even if another tab sent it too.
-        localStorage.removeItem(key(entry));
+        await transactLocal(()=>({result:undefined,changes:[[key(entry),null]]}));
         sent++;
       } catch (error) {
         if (sessionKey() !== session) break;
@@ -77,7 +80,7 @@ export const syncOfflineQueue = (): Promise<SyncResult> => {
           break;
         }
         // Preserve rejected intent for review instead of silently losing it.
-        localStorage.setItem(key(entry), JSON.stringify({ ...entry, failure: { status: error.status, message: error.message } }));
+        await transactLocal(records=>({result:undefined,changes:records.has(key(entry)) ? [[key(entry),JSON.stringify({...entry,failure:{status:error.status,message:error.message}})]] : []}));
         rejected++;
       }
       epoch++;
@@ -91,7 +94,7 @@ export const syncOfflineQueue = (): Promise<SyncResult> => {
       await Promise.all([...movedLists].map(async list => {
         try {
           const items = await request<Item[]>(`/api/items?list=${encodeURIComponent(list)}`);
-          if (sessionKey() === session && epoch === version && queuedMutationCount() === 0) writeSnapshot(list, items);
+          if (sessionKey() === session && epoch === version && queuedMutationCount() === 0) await writeSnapshot(list, items, {confirmedAt:Date.now(),dirty:false});
         } catch { /* Keep the last snapshot. */ }
       }));
     }
@@ -107,15 +110,22 @@ export const syncOfflineQueue = (): Promise<SyncResult> => {
 };
 
 /** All writes share one durable ordered path, including fast online taps. */
-export const submitMutation = async <T = void>(url: string, method: string, body?: unknown): Promise<T | undefined> => {
-  const entry = enqueueMutation({ url, method, body });
+export const submitMutation = async <T = void>(url: string, method: string, body?: unknown, restoredItem?: Item): Promise<T | undefined> => {
+  const entry = await enqueueMutation({ url, method, body, restoredItem });
   if (navigator.onLine) await syncOfflineQueue();
-  const raw = localStorage.getItem(key(entry));
+  const raw = readLocal(key(entry));
   const settled: StoredMutation | null = raw ? JSON.parse(raw) : null;
   if (settled?.failure) {
     throw new ApiError(settled.failure.status, settled.failure.message);
   }
   return undefined;
+};
+
+/** A reviewed conflict is a new intent; never reuse a rejected operation ID. */
+export const replaceRejectedMutation = async (id: string, mutation: QueuedMutation) => {
+  const entry=await enqueueMutation(mutation,id);
+  if(navigator.onLine) await syncOfflineQueue();
+  return entry;
 };
 
 // Pre-upgrade queues have no reliable account owner. Retain them for explicit

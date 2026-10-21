@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { readLocal, writeLocal, storageFailed } from '../api/localStore';
 import { getAccountId } from '../api/client';
 import { readUndoStack, type UndoEntry, type UndoGroup } from '../api/undoStack';
 
@@ -10,7 +11,7 @@ export const useVoiceFeedback = (list: string, begin: (label: string) => UndoGro
   const warnings = useRef<string[]>([]);
   const [result, setResult] = useState<Result | null>(() => {
     try {
-      const value = JSON.parse(localStorage.getItem(key) ?? 'null') as Result | null;
+      const value = JSON.parse(readLocal(key) ?? 'null') as Result | null;
       if (!value || typeof value.text !== 'string' || !Array.isArray(value.messages) || !Array.isArray(value.warnings)) return null;
       if (value.status === 'processing') {
         const entry = readUndoStack(list).find(entry => entry.id === value.groupId);
@@ -23,7 +24,7 @@ export const useVoiceFeedback = (list: string, begin: (label: string) => UndoGro
   });
   const save = useCallback((value: Result) => {
     setResult(value);
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* The result still stays on screen. */ }
+    void writeLocal(key,JSON.stringify(value)).catch(storageFailed);
   }, [key]);
   const start = useCallback((text: string) => {
     group.current = begin(text);
@@ -46,7 +47,7 @@ export const useVoiceFeedback = (list: string, begin: (label: string) => UndoGro
     setResult(previous => {
       if (!previous || previous.groupId !== id) return previous;
       const value: Result = {...previous,status:'undone',undoable:false};
-      try { localStorage.setItem(key,JSON.stringify(value)); } catch { /* Keep the visible result. */ }
+      void writeLocal(key,JSON.stringify(value)).catch(storageFailed);
       return value;
     });
   }, [key]);

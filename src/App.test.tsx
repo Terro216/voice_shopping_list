@@ -26,6 +26,7 @@ const items = [
 const routes: Record<string, Handler> = {
   '/api/lists': () => lists,
   '/api/items': () => items,
+  '/api/items/sync': () => ({version:0,items}),
   '/api/items/suggestions': () => [],
   '/api/items/deleted': () => [
     { id: 'c', name: 'кефир', note: null, count: 1, list_id: 'ann', bought: false, deleted_at: 9 },
