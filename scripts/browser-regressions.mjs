@@ -302,6 +302,10 @@ try {
     assert.equal((await rows(account)).length,3);
     await page.getByRole('textbox',{name:'Добавить вручную…'}).fill('мыло');
     await page.getByRole('button',{name:'Добавить',exact:true}).click();
+    // Reload only once the app confirms the manual write finished. An immediate
+    // navigation can abort an IndexedDB transaction that has not committed yet.
+    await page.waitForFunction(()=>document.querySelector('input[aria-label="Добавить вручную…"]')?.value==='');
+    assert.ok((await rows(account)).some(item=>item.name==='мыло'));
     await page.reload({waitUntil:'networkidle'});
     await page.getByRole('button',{name:'Отменить фразу',exact:true}).waitFor();
     const card = page.getByRole('region',{name:'Последняя фраза'});
