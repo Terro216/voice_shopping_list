@@ -3,7 +3,7 @@ import { Item, ItemEdit } from '../api/items';
 import { haptic } from '../utils/feedback';
 import { useT } from '../i18n';
 import styles from '../App.module.css';
-import { quantityStep } from '../../shared/quantity.js';
+import { QuantityControls } from './QuantityControls';
 import { formatQuantity } from '../utils/quantity';
 import { ItemEditSheet } from './ItemEditSheet';
 
@@ -74,6 +74,7 @@ export const ItemRow = ({
 }: Props) => {
   const { t, lang } = useT();
   const [editing, setEditing] = useState(false);
+  const [quantityOpen, setQuantityOpen] = useState(false);
   const [focusNote, setFocusNote] = useState(false);
   const [swipe, setSwipe] = useState(0);
   const [settling, setSettling] = useState(false);
@@ -84,6 +85,7 @@ export const ItemRow = ({
   const closeEditor = useCallback(() => setEditing(false), []);
   const openEditor = (note = false) => {
     onEditorOpen?.();
+    setQuantityOpen(false);
     setFocusNote(note);
     setEditing(true);
   };
@@ -240,28 +242,14 @@ export const ItemRow = ({
             <span className={styles.itemText}>
               <span className={styles.itemName}>{item.name}</span>
             </span>
-            {(item.unit || item.count !== 1) && <span className={styles.itemCount}>{formatQuantity(item, lang)}</span>}
           </button>
 
           <div className={styles.itemControls}>
-            {!item.bought && (
-              <>
-                <button
-                  className={styles.stepButton}
-                  onClick={() => onDecrement(item.id)}
-                  aria-label={t(item.count <= quantityStep(item.unit) ? 'removeItem' : item.unit ? 'decreaseQuantity' : 'oneLess', { name: item.name })}
-                >
-                  −
-                </button>
-                <button
-                  className={styles.stepButton}
-                  onClick={() => onIncrement(item.id)}
-                  aria-label={t(item.unit ? 'increaseQuantity' : 'oneMore', { name: item.name })}
-                >
-                  +
-                </button>
-              </>
-            )}
+            <button type="button" className={styles.itemCount} aria-label={t('quantityFor', { name: item.name })}
+              aria-expanded={quantityOpen} aria-controls={`quantity-${item.id}`}
+              onClick={() => { onEditorOpen?.(); setQuantityOpen(!quantityOpen); }}>
+              {formatQuantity(item, lang)}
+            </button>
             {/* Delete lives behind this menu rather than next to "−": a mis-tap
                 while walking used to wipe an item instead of decrementing it. */}
             <button
@@ -275,6 +263,9 @@ export const ItemRow = ({
           </div>
         </div>
 
+        {quantityOpen && <div id={`quantity-${item.id}`} data-no-swipe="">
+          <QuantityControls item={item} onIncrement={onIncrement} onDecrement={onDecrement} onEdit={onEdit} onClose={() => setQuantityOpen(false)} />
+        </div>}
         {item.note && <button type="button" className={styles.noteLink}
           onClick={() => openEditor(true)}
           aria-label={t(item.note ? 'editNoteFor' : 'addNoteFor', { name: item.name })}>

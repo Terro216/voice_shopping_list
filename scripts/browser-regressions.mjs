@@ -123,8 +123,34 @@ try {
     await page.screenshot({ path: screenshot('editor-320.png') });
     const editorOverflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
     await context.close();
-    assert.ok(narrow.firstItemTextWidth > 140); assert.ok(narrow.rowHeight < 190); assert.equal(narrow.scrollWidth, 320); assert.equal(editorOverflow, false); assert.deepEqual(errors, []);
+    assert.ok(narrow.firstItemTextWidth > 130); assert.ok(narrow.rowHeight < 130); assert.equal(narrow.scrollWidth, 320); assert.equal(editorOverflow, false); assert.deepEqual(errors, []);
     return { help, geometry, narrow, editorOverflow, pageErrors: errors };
+  });
+
+  await probe('compact_controls_reorder_and_bottom_composer', async () => {
+    const account = await register('compact');
+    for (let n = 0; n < 18; n++) await seedItem(account, 'Покупка ' + n);
+    const {context, page} = await openAccount(account, {width:320});
+    assert.equal(await page.getByRole('button', {name:/^Переместить:/}).count(),0);
+    assert.equal(await page.getByRole('button', {name:/^Ещё один:/}).count(),0);
+    const before = (await rows(account)).filter(item => !item.bought).map(item => item.id);
+    await page.getByRole('button', {name:'Действия со списком',exact:true}).click();
+    await page.getByRole('button', {name:'Изменить порядок',exact:true}).click();
+    const grip = page.locator('button[data-no-swipe]').first();
+    await grip.focus(); await grip.press('ArrowDown');
+    await sleep(200);
+    assert.deepEqual((await rows(account)).map(item => item.id).slice(0,2),[before[1],before[0]]);
+    await page.getByRole('button',{name:'Готово',exact:true}).click();
+    await page.evaluate(() => window.scrollTo(0,document.body.scrollHeight));
+    const geometry = await page.locator('[class*="composer"]').evaluate(el => ({top:el.getBoundingClientRect().top,bottom:el.getBoundingClientRect().bottom,height:innerHeight}));
+    assert.ok(Math.abs(geometry.bottom-geometry.height)<2);
+    await page.getByRole('textbox',{name:'Добавить вручную…'}).fill('5 яблок');
+    await page.getByRole('button',{name:'Добавить',exact:true}).click();
+    await sleep(200);
+    assert.equal((await rows(account)).find(item => item.name==='яблок')?.count,5);
+    await page.screenshot({path:screenshot('composer-long-list-320.png')});
+    await context.close();
+    return {keyboardReorder:true,bottomComposer:geometry,manualAdd:true};
   });
 
   await probe('lost_quantity_response_applies_once', async () => {
@@ -137,6 +163,7 @@ try {
       if (countRequests === 1) { await route.fetch(); await route.abort('failed'); }
       else await route.continue();
     });
+    await page.getByRole('button', { name: 'Количество: молоко', exact: true }).click();
     await page.getByRole('button', { name: 'Ещё один: молоко', exact: true }).click();
     await sleep(2200);
     const state = await rows(account);
@@ -174,6 +201,7 @@ try {
     const { context, page } = await openAccount(account);
     await page.getByRole('button', { name: /^Изменить: / }).first().click();
     await page.getByRole('dialog').getByRole('button', { name: 'Удалить: молоко', exact: true }).click();
+    await page.getByRole('button', { name: 'Количество: хлеб', exact: true }).click();
     await page.getByRole('button', { name: 'Ещё один: хлеб', exact: true }).click();
     await page.getByRole('button', { name: 'Вернуть', exact: true }).click();
     await sleep(250);
@@ -186,6 +214,7 @@ try {
   await probe('wrong_current_password_keeps_session', async () => {
     const account = await register('audit_password');
     const { context, page } = await openAccount(account);
+    await page.getByRole('button', { name: 'Действия со списком', exact: true }).click();
     await page.getByRole('button', { name: 'Настройки', exact: true }).click();
     await page.getByPlaceholder('Текущий пароль', { exact: true }).fill('wrong-password');
     await page.getByPlaceholder('Новый пароль', { exact: true }).fill('new-password-fixture');
@@ -208,7 +237,7 @@ try {
     await context.setOffline(true);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.getByRole('checkbox', { name: 'Отметить купленным: молоко', exact: true }).waitFor();
-    await page.getByRole('button', { name: /^📚 Списки/ }).click();
+    await page.getByRole('button', { name: /^Выбрать список:/ }).click();
     const listCount = await page.getByRole('dialog').locator('li').count();
     await page.screenshot({ path: screenshot('offline-lists-390.png') });
     await context.close();
@@ -282,7 +311,7 @@ try {
     await page.getByRole('checkbox', { name: 'Отметить купленным: синхронизация', exact: true }).waitFor();
     await api('/api/lists/' + owner.username, owner.token, 'PATCH', { name: 'Новое название' });
     await sleep(350);
-    const visibleTitle = await page.locator('h1').innerText();
+    const visibleTitle = (await page.locator('h1').innerText()).replace(/\s*⌄$/, '');
     await context.close();
     assert.equal(visibleTitle, 'Новое название');
     return { liveItemAppeared: true, expectedTitle: 'Новое название', visibleTitle };
@@ -298,10 +327,12 @@ try {
     await popup.waitForLoadState('networkidle');
     const clientIds = [];
     context.on('request', request => { if (request.method() === 'PATCH') clientIds.push(request.headers()['x-client-id']); });
+    await page.getByRole('button', { name: 'Количество: молоко', exact: true }).click();
     await page.getByRole('button', { name: 'Ещё один: молоко', exact: true }).click();
     await sleep(400);
     const serverCount = (await rows(account))[0].count;
     const popupCount = await popup.locator('[class*="itemCount"]').first().innerText();
+    await popup.getByRole('button', { name: 'Количество: молоко', exact: true }).click();
     await popup.getByRole('button', { name: 'Ещё один: молоко', exact: true }).click();
     await sleep(400);
     assert.equal(new Set(clientIds).size, 2);
@@ -327,6 +358,7 @@ try {
     });
     await page.getByRole('checkbox', { name: 'Отметить купленным: молоко', exact: true }).click();
     await arrived;
+    await page.getByRole('button', { name: /^Куплено ·/ }).click();
     await page.getByRole('checkbox', { name: 'Вернуть в список: молоко', exact: true }).click();
     await sleep(150);
     release();
@@ -376,7 +408,9 @@ try {
     const other = await context.newPage();
     await other.goto(base, { waitUntil: 'networkidle' });
     await context.setOffline(true);
+    await page.getByRole('button', { name: 'Количество: молоко', exact: true }).click();
     await page.getByRole('button', { name: 'Ещё один: молоко', exact: true }).click();
+    await other.getByRole('button', { name: 'Количество: молоко', exact: true }).click();
     await other.getByRole('button', { name: 'Ещё один: молоко', exact: true }).click();
     const count = await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('mutation_v3:')).length);
     assert.equal(count, 2);
@@ -391,6 +425,7 @@ try {
   await probe('password_change_keeps_current_browser_authenticated', async () => {
     const account = await register('password_success');
     const { context, page } = await openAccount(account);
+    await page.getByRole('button', { name: 'Действия со списком', exact: true }).click();
     await page.getByRole('button', { name: 'Настройки', exact: true }).click();
     await page.getByPlaceholder('Текущий пароль', { exact: true }).fill(account.password);
     await page.getByPlaceholder('Новый пароль', { exact: true }).fill('updated-fixture-password');

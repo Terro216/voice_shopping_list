@@ -4,6 +4,7 @@ import { useShoppingList } from '../hooks/useShoppingList';
 import { useConversation } from '../hooks/useConversation';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import { useSuggestions } from '../hooks/useSuggestions';
+import { useComposerPosition } from '../hooks/useComposerPosition';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { useDragReorder } from '../hooks/useDragReorder';
 import type { ThemeChoice } from '../hooks/useTheme';
@@ -90,10 +91,13 @@ export const ShoppingList = ({
     undo,
   } = useShoppingList(list, viewer);
   const [newItemName, setNewItemName] = useState('');
-  const [sheet, setSheet] = useState<'none' | 'share' | 'settings' | 'import' | 'lists' | 'help' | 'sync'>(
+  const [sheet, setSheet] = useState<'none' | 'share' | 'settings' | 'import' | 'lists' | 'help' | 'sync' | 'menu'>(
     'none',
   );
   const [showIntro, setShowIntro] = useState(() => !localStorage.getItem(HELP_SEEN_KEY));
+  const [reordering, setReordering] = useState(false);
+  const [boughtOpen, setBoughtOpen] = useState(false);
+  const composer = useComposerPosition();
   const [adding, setAdding] = useState(false);
   const [importText, setImportText] = useState('');
   const { frequent, matches, refreshFrequent } = useSuggestions(list, newItemName);
@@ -373,11 +377,12 @@ export const ShoppingList = ({
   const typeaheadChips = matches.filter((s) => !itemNames.has(s.name.toLowerCase())).slice(0, 5);
 
   const rowProps = {
-    onToggleBought: (id: string) => {
+    onToggleBought: async (id: string) => {
       // A tap already gives visual feedback, so this stays on the quiet
       // channel — a beep per tap would be noise in a shop.
       haptic('checked');
-      toggleBought(id);
+      const wasActive = items.some(item => item.id === id && !item.bought);
+      if (await toggleBought(id) && wasActive) toastWithUndo(t('checkedOff', { items: items.find(item => item.id === id)?.name ?? '' }));
     },
     onIncrement: (id: string) => changeCount(id, quantityStep(items.find((item) => item.id === id)?.unit)),
     onDecrement: (id: string) => changeCount(id, -quantityStep(items.find((item) => item.id === id)?.unit)),
@@ -388,76 +393,22 @@ export const ShoppingList = ({
 
   return (
     <div className={styles.container}>
-      <header className={styles.header}>
-        <h1 className={styles.title}>{listName}</h1>
+      <header className={`${styles.header} ${styles.shoppingHeader}`}>
+        <h1 className={styles.title}><button type="button" className={styles.listTitleButton}
+          aria-label={t('chooseList', { name: listName })} onClick={() => setSheet('lists')}>
+          {listName} <span aria-hidden="true">⌄</span>
+        </button></h1>
         <div className={styles.headerActions}>
-          <button
-            type="button"
-            className={styles.iconButton}
-            onClick={() => void performUndo()}
-            title={t('undo')}
-            aria-label={t('undo')}
-          >
-            ↩️
-          </button>
-          <PushToggle list={list} listName={listName} />
-          <button
-            type="button"
-            className={styles.iconButton}
-            onClick={() => openImport()}
-            title={t('import')}
-            aria-label={t('import')}
-          >
-            📋
-          </button>
-          <button
-            type="button"
-            className={styles.iconButton}
-            onClick={() => setSheet('share')}
-            title={t('shareTitle')}
-            aria-label={t('shareTitle')}
-          >
-            🔗
-          </button>
-          <button
-            type="button"
-            className={styles.iconButton}
-            onClick={() => setSheet('settings')}
-            title={t('settings')}
-            aria-label={t('settings')}
-          >
-            ⚙️
-          </button>
+          <button type="button" className={styles.iconButton} onClick={() => void performUndo()} aria-label={t('undo')}>↶</button>
+          <button type="button" onClick={() => { stopListening(true); setSheet('menu'); }} aria-label={t('listMenu')}>{t('menu')}</button>
         </div>
       </header>
-
-      <div className={styles.listBar}>
-        <button type="button" className={styles.listPickerButton} onClick={() => setSheet('lists')}>
-          📚 {t('lists')}
-          {lists.length > 1 && ` (${lists.length})`}
-        </button>
-        {/* Spelled out rather than hidden behind a "?" among five other icons:
-            the whole point of this one is that somebody meeting the app for the
-            first time can find it. */}
-        <button type="button" className={styles.listPickerButton} onClick={() => setSheet('help')}>
-          ❓ {t('help')}
-        </button>
-        {currentList && !currentList.owned && (
-          <span className={styles.activeList}>
-            {t('sharedByOwner', { owner: currentList.owner })}
-          </span>
-        )}
-        {list !== viewer && (
-          <button type="button" className={styles.linkButton} onClick={() => onSelectList(viewer)}>
-            {t('backToMyList')}
-          </button>
-        )}
-        {otherViewers.length > 0 && (
-          <span className={styles.presence}>
-            👀 {t('viewing')}: {otherViewers.join(', ')}
-          </span>
-        )}
-      </div>
+      {(otherViewers.length > 0 || (currentList && !currentList.owned)) && <div className={styles.listBar}>
+        {currentList && !currentList.owned && <span className={styles.activeList}>{t('sharedByOwner', { owner: currentList.owner })}</span>}
+        {otherViewers.length > 0 && <span className={styles.presence}>{t('viewing')}: {otherViewers.join(', ')}</span>}
+      </div>}
+      {reordering && <div className={styles.reorderBar} role="status"><span>{t('reorderHint')}</span>
+        <button type="button" onClick={() => setReordering(false)}>{t('done')}</button></div>}
 
       {(isOffline || pendingCount > 0 || failedCount > 0 || loadError || legacyMutations().length > 0) && (
         <p className={styles.offlineBar} role="status">
@@ -474,6 +425,54 @@ export const ShoppingList = ({
         <p>{t('quickIntro')}</p>
         <button onClick={() => { localStorage.setItem(HELP_SEEN_KEY, '1'); setShowIntro(false); }}>{t('gotIt')}</button>
       </div>}
+      <div className={`${styles.list} ${dragId ? styles.listDragging : ''}`}>
+        {loading && <p role="status">{t('loading')}</p>}
+        {items.length === 0 && !loading && !loadError && <p className={styles.empty}>{t('emptyList')}</p>}
+
+        {activeItems.map((item, index) => (
+          <div key={item.id} className={styles.itemSlot}>
+            {dropIndex === index && <div className={styles.dropLine} aria-hidden="true" />}
+            <ItemRow
+              item={item}
+              {...rowProps}
+              onDragStart={reordering ? startDrag : undefined}
+              onMoveByKeyboard={moveByKeyboard}
+              isDragging={dragId === item.id}
+              dragOffset={dragId === item.id ? dragOffset : 0}
+              registerRow={registerRow}
+            />
+          </div>
+        ))}
+        {dropIndex === activeItems.length && <div className={styles.dropLine} aria-hidden="true" />}
+
+        {boughtItems.length > 0 && (
+          <>
+            <div className={styles.boughtHeader}>
+              <button type="button" aria-expanded={boughtOpen} aria-controls="bought-items" onClick={() => setBoughtOpen(!boughtOpen)}>
+                {t('bought')} · {boughtItems.length} <span aria-hidden="true">{boughtOpen ? '⌃' : '⌄'}</span>
+              </button>
+              <button className={styles.clearBoughtButton} onClick={handleClearBought}>
+                {t('clearBought')}
+              </button>
+            </div>
+            <div id="bought-items" hidden={!boughtOpen}>
+              {boughtItems.map((item) => <ItemRow key={item.id} item={item} {...rowProps} />)}
+            </div>
+          </>
+        )}
+
+        <DeletedDrawer
+          items={deletedItems}
+          loading={deletedLoading}
+          error={deletedError}
+          onRetry={() => void retryDeleted()}
+          onVisibilityChange={watchDeleted}
+          onRestore={handleRestore}
+          onPurge={handlePurge}
+        />
+      </div>
+
+      <div ref={composer.ref} className={styles.composer} style={{ bottom: composer.bottom, maxHeight: composer.viewportHeight * 0.55 }} aria-label={t('addPurchase')}>
       <VoiceControls
         isSupported={isSupported}
         isListening={isListening}
@@ -520,53 +519,20 @@ export const ShoppingList = ({
         </div>
       )}
 
-      <div className={`${styles.list} ${dragId ? styles.listDragging : ''}`}>
-        {loading && <p role="status">{t('loading')}</p>}
-        {items.length === 0 && !loading && !loadError && <p className={styles.empty}>{t('emptyList')}</p>}
-
-        {activeItems.map((item, index) => (
-          <div key={item.id} className={styles.itemSlot}>
-            {dropIndex === index && <div className={styles.dropLine} aria-hidden="true" />}
-            <ItemRow
-              item={item}
-              {...rowProps}
-              onDragStart={startDrag}
-              onMoveByKeyboard={moveByKeyboard}
-              isDragging={dragId === item.id}
-              dragOffset={dragId === item.id ? dragOffset : 0}
-              registerRow={registerRow}
-            />
-          </div>
-        ))}
-        {dropIndex === activeItems.length && <div className={styles.dropLine} aria-hidden="true" />}
-
-        {boughtItems.length > 0 && (
-          <>
-            <div className={styles.boughtHeader}>
-              <span>
-                {t('bought')} ({boughtItems.length})
-              </span>
-              <button className={styles.clearBoughtButton} onClick={handleClearBought}>
-                {t('clearBought')}
-              </button>
-            </div>
-            {boughtItems.map((item) => (
-              <ItemRow key={item.id} item={item} {...rowProps} />
-            ))}
-          </>
-        )}
-
-        <DeletedDrawer
-          items={deletedItems}
-          loading={deletedLoading}
-          error={deletedError}
-          onRetry={() => void retryDeleted()}
-          onVisibilityChange={watchDeleted}
-          onRestore={handleRestore}
-          onPurge={handlePurge}
-        />
       </div>
-
+      <div aria-hidden="true" style={{ height: composer.height, flexShrink: 0 }} />
+      {sheet === 'menu' && <Sheet title={t('listMenu')} onClose={() => setSheet('none')}>
+        <div className={styles.listMenu}>
+          <button type="button" onClick={() => setSheet('lists')}>{t('lists')}</button>
+          <button type="button" onClick={() => { setReordering(!reordering); setSheet('none'); }}>{t(reordering ? 'finishReorder' : 'reorderItems')}</button>
+          <button type="button" onClick={() => openImport()}>{t('import')}</button>
+          <button type="button" onClick={() => setSheet('share')}>{t('shareTitle')}</button>
+          <PushToggle list={list} listName={listName} showLabel />
+          <button type="button" onClick={() => setSheet('sync')}>{t('syncDetails')}</button>
+          <button type="button" onClick={() => setSheet('settings')}>{t('settings')}</button>
+          <button type="button" onClick={() => setSheet('help')}>{t('help')}</button>
+        </div>
+      </Sheet>}
       {choice && (
         <Sheet title={choice.title} onClose={() => choose(null)}>
           <p className={styles.sheetSubtitle}>{t('voiceChoiceHint')}</p>

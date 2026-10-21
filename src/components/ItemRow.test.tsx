@@ -73,6 +73,7 @@ describe('ItemRow gestures', () => {
 
   it('leaves the buttons alone: a swipe started on "+" is not a swipe', () => {
     const { handlers } = setup();
+    fireEvent.click(screen.getByRole('button', { name: 'Количество: молоко' }));
     const plus = screen.getByLabelText(/Ещё один|One more/);
     fireEvent.pointerDown(plus, { pointerId: 2, clientX: 0, clientY: 0, button: 0 });
     fireEvent.pointerMove(plus, { pointerId: 2, clientX: 150, clientY: 0 });

@@ -14,6 +14,7 @@ type Props = {
   list: string;
   /** Shown to the user; `list` itself is an opaque id. */
   listName: string;
+  showLabel?: boolean;
 };
 
 type State = 'hidden' | 'off' | 'on' | 'busy';
@@ -26,7 +27,7 @@ const pushSupported = () =>
  * list. Renders nothing when push is unavailable (unsupported browser, no
  * service worker in dev, VAPID not configured on the server).
  */
-export const PushToggle = ({ list, listName }: Props) => {
+export const PushToggle = ({ list, listName, showLabel }: Props) => {
   const { t } = useT();
   const [state, setState] = useState<State>('hidden');
   const publicKeyRef = useRef<string | null>(null);
@@ -113,7 +114,7 @@ export const PushToggle = ({ list, listName }: Props) => {
       aria-label={t('notifications')}
       aria-pressed={state === 'on'}
     >
-      {state === 'on' ? '🔔' : '🔕'}
+      {state === 'on' ? '🔔' : '🔕'} {showLabel && t('notifications')}
     </button>
   );
 };

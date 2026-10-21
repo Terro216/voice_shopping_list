@@ -165,6 +165,7 @@ describe('App', () => {
 
     // It used to be a bare "?" sixth in a row of header icons, which on a phone
     // was pushed off the edge of the screen entirely.
+    fireEvent.click(screen.getByRole('button', { name: 'Действия со списком' }));
     const guide = screen.getByRole('button', { name: /Как пользоваться/ });
     expect(guide.textContent).toContain('Как пользоваться');
 
@@ -176,7 +177,7 @@ describe('App', () => {
     // most recently changed are the ones worth asserting.
     expect(sheet.textContent).toContain('дальше');
     expect(sheet.textContent).toContain('молоко 4 хлеб 2');
-    expect(sheet.textContent).toContain('точки слева');
+    expect(sheet.textContent).toContain('Изменить порядок');
     expect(sheet.textContent).toContain('Escape');
     expect(sheet.textContent).not.toContain('⠿');
   });
@@ -208,7 +209,7 @@ describe('App', () => {
     render(<App />);
     await screen.findByText('молоко');
 
-    fireEvent.click(screen.getByRole('button', { name: /Списки/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Выбрать список:/ }));
     const dialog = await screen.findByRole('dialog', { name: 'Мои списки' });
     expect(dialog).toBeTruthy();
 
