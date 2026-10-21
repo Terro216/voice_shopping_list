@@ -16,6 +16,7 @@ mkdirSync(artifactDir, { recursive: true });
 const dataDir = mkdtempSync(path.join(tmpdir(), 'shopping-browser-data-'));
 const screenshot = (name) => path.join(artifactDir, name);
 const probe = async (name, fn) => {
+  if (process.env.BROWSER_PROBE && !name.includes(process.env.BROWSER_PROBE)) return;
   try { const detail = await fn(); results.push({ name, ...detail }); console.log(JSON.stringify(results.at(-1))); }
   catch (e) { results.push({ name, probe_error: String(e).slice(0, 1200) }); console.log(JSON.stringify(results.at(-1))); }
 };
@@ -258,6 +259,60 @@ try {
     await context.close();
     assert.equal(state.length, 2); assert.equal(choiceShown, 1);
     return { rowsBefore: 2, rowsAfter: state.length, remainingNames: state.map(x => x.name), choiceShown };
+  });
+
+  await probe('voice_phrase_result_and_group_undo_survive_reload', async () => {
+    const account = await register('phrase_group');
+    const {context,page} = await openAccount(account);
+    await page.getByRole('button',{name:'🎤 Говорить',exact:true}).click();
+    await page.evaluate(() => window.reviewRecognition.onresult({resultIndex:0,results:[{isFinal:true,0:{transcript:'добавь молоко, хлеб и яйца'}}]}));
+    await page.getByRole('button',{name:'Отменить фразу',exact:true}).waitFor();
+    assert.equal((await rows(account)).length,3);
+    await page.getByRole('textbox',{name:'Добавить вручную…'}).fill('мыло');
+    await page.getByRole('button',{name:'Добавить',exact:true}).click();
+    await page.reload({waitUntil:'networkidle'});
+    await page.getByRole('button',{name:'Отменить фразу',exact:true}).waitFor();
+    const card = page.getByRole('region',{name:'Последняя фраза'});
+    assert.ok((await card.innerText()).includes('молоко'));
+    await page.screenshot({path:screenshot('voice-result-390.png')});
+    await page.getByRole('button',{name:'Отменить фразу',exact:true}).click();
+    await page.getByText('Действия этой фразы отменены.',{exact:true}).waitFor();
+    assert.deepEqual((await rows(account)).map(item=>item.name),['мыло']);
+    await context.close();
+    return {phraseItems:3,resultSurvivesReload:true,manualItemPreserved:true};
+  });
+
+  await probe('partial_voice_phrase_only_undoes_accepted_actions', async () => {
+    const account = await register('phrase_partial');
+    const {context,page} = await openAccount(account);
+    await page.route('**/api/items',route => route.request().method()==='POST' && route.request().postDataJSON().name==='хлеб'
+      ? route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:'fixture refusal'})}) : route.continue());
+    await page.getByRole('button',{name:'🎤 Говорить',exact:true}).click();
+    await page.evaluate(() => window.reviewRecognition.onresult({resultIndex:0,results:[{isFinal:true,0:{transcript:'добавь молоко, хлеб и яйца'}}]}));
+    await page.getByRole('button',{name:'Отменить фразу',exact:true}).waitFor();
+    assert.deepEqual((await rows(account)).map(item=>item.name),['молоко']);
+    assert.ok(await page.getByText('Не всё применено. Раскройте результат, чтобы посмотреть причину.',{exact:true}).isVisible());
+    await page.getByRole('button',{name:'Отменить фразу',exact:true}).click();
+    await page.getByText('Действия этой фразы отменены.',{exact:true}).waitFor();
+    assert.equal((await rows(account)).length,0);
+    await context.close();
+    return {accepted:1,rejected:1,notAttempted:1,undoLeavesNoItems:true};
+  });
+
+  await probe('bulk_import_has_one_undo_group', async () => {
+    const account = await register('import_group');
+    const {context,page} = await openAccount(account);
+    await page.getByRole('button',{name:'Действия со списком',exact:true}).click();
+    await page.getByRole('button',{name:'Вставить список',exact:true}).click();
+    await page.getByRole('dialog').getByRole('textbox').fill('молоко\nхлеб\n2 яйца');
+    await page.getByRole('button',{name:'Добавить (3)',exact:true}).click();
+    await page.getByRole('dialog').waitFor({state:'detached'});
+    assert.equal((await rows(account)).length,3);
+    await page.getByRole('button',{name:'Отменить',exact:true}).click();
+    await sleep(300);
+    assert.equal((await rows(account)).length,0);
+    await context.close();
+    return {imported:3,undoActions:1};
   });
 
   await probe('offline_clear_preserves_later_purchases', async () => {

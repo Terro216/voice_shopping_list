@@ -11,6 +11,7 @@ import type { Unit } from '../../shared/quantity.js';
  * localStorage and picked up by the next session.
  */
 export type UndoAction =
+  | { kind: 'group'; entries: UndoEntry[] }
   | { kind: 'removeItem'; id: string; expected?: ItemExpectation }
   | { kind: 'restoreItems'; items: Item[] }
   | { kind: 'changeCount'; id: string; delta: number; unit?: Unit | null }
@@ -23,7 +24,10 @@ export type UndoEntry = {
   id: string;
   label: string;
   action: UndoAction;
+  summary?: string;
 };
+
+export type UndoGroup = { id: string; label: string };
 
 export const UNDO_STACK_LIMIT = 20;
 

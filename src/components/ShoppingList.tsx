@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useShoppingList } from '../hooks/useShoppingList';
+import { useVoiceFeedback } from '../hooks/useVoiceFeedback';
+import type { UndoGroup } from '../api/undoStack';
 import { useConversation } from '../hooks/useConversation';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import { useSuggestions } from '../hooks/useSuggestions';
@@ -75,6 +77,7 @@ export const ShoppingList = ({
     isOffline,
     pendingCount,
     accessDenied, loading, loadError, deletedError, deletedLoading, failedCount, retrySync, retryDeleted, lastUndoId,
+    beginUndoGroup, finishUndoGroup,
     addItem,
     removeItem,
     editItem,
@@ -90,6 +93,8 @@ export const ShoppingList = ({
     purgeDeleted,
     undo,
   } = useShoppingList(list, viewer);
+  const voice = useVoiceFeedback(list, beginUndoGroup, finishUndoGroup);
+  const { group: voiceGroup, report: reportVoice, markUndone: markVoiceUndone } = voice;
   const [newItemName, setNewItemName] = useState('');
   const [sheet, setSheet] = useState<'none' | 'share' | 'settings' | 'import' | 'lists' | 'help' | 'sync' | 'menu'>(
     'none',
@@ -109,8 +114,8 @@ export const ShoppingList = ({
   const listName = currentList?.name ?? (list === viewer ? viewer : t('activeList'));
 
   const addAndRefresh = useCallback(
-    async (name: string, count = 1, details: Pick<Item, 'unit' | 'note'> = {}) => {
-      const item = await addItem(name, count, details);
+    async (name: string, count = 1, details: Pick<Item, 'unit' | 'note'> = {}, group?: UndoGroup) => {
+      const item = await addItem(name, count, details, group);
       refreshFrequent();
       return item;
     },
@@ -119,16 +124,19 @@ export const ShoppingList = ({
 
   const performUndo = useCallback(async (actionId?: string) => {
     try {
+      const id = actionId ?? lastUndoId();
       const label = await undo(actionId);
       if (label) {
+        markVoiceUndone(id);
         toast(t('undone', { label }), { icon: '↩️', id: ITEM_TOAST });
+        return label;
       } else {
         toast(t('nothingToUndo'), { id: ITEM_TOAST });
       }
     } catch {
       toast.error(t('voiceChangeFailed'), { id: ITEM_TOAST });
     }
-  }, [undo, t]);
+  }, [undo, t, lastUndoId, markVoiceUndone]);
 
   /** Toast that offers to take the action back — the store-aisle safety net. */
   const toastWithUndo = useCallback(
@@ -181,24 +189,27 @@ export const ShoppingList = ({
               ),
               { icon: '🤔', id: SPEECH_TOAST },
             );
+            reportVoice(t('notUnderstood', { text: spoken }), true);
             return;
           }
           if (command.items.some((parsed) => !isValidQuantity(parsed.count, parsed.unit))) {
             cue('unrecognized');
             toast.error(t('invalidQuantity'), { id: SPEECH_TOAST });
+            reportVoice(t('invalidQuantity'), true);
             return;
           }
           if (command.items.some((parsed) => (parsed.note?.length ?? 0) > 200)) {
             cue('unrecognized');
             toast.error(t('noteTooLong'), { id: SPEECH_TOAST });
+            reportVoice(t('noteTooLong'), true);
             return;
           }
           // Sequential: a correction following this add must know the actual
           // row id, including when dictation merged into an existing row.
           let lastItem: Item | undefined;
           for (const parsed of command.items) {
-            lastItem = await addAndRefresh(parsed.name, parsed.count, parsed);
-            if (!lastItem) return;
+            lastItem = await addAndRefresh(parsed.name, parsed.count, parsed, voiceGroup.current);
+            if (!lastItem) { reportVoice(t('voiceChangeFailed'), true); return; }
           }
           cue('added');
           toast.success(
@@ -222,9 +233,9 @@ export const ShoppingList = ({
               continue;
             }
             if (command.type === 'check') {
-              if (!await setBought(item.id, true)) continue;
+              if (!await setBought(item.id, true, voiceGroup.current)) { reportVoice(t('voiceChangeFailed'), true); continue; }
             } else {
-              if (!await removeItem(item.id)) continue;
+              if (!await removeItem(item.id, voiceGroup.current)) { reportVoice(t('voiceChangeFailed'), true); continue; }
             }
             found.push(item.name);
           }
@@ -240,23 +251,27 @@ export const ShoppingList = ({
           if (missed.length > 0) {
             cue('unrecognized');
             toast.error(t('notOnList', { items: missed.join(', ') }), { id: SPEECH_TOAST });
+            reportVoice(t('notOnList', { items: missed.join(', ') }), true);
           }
           break;
         }
         case 'clearBought':
           cue('removed');
-          { const id = await clearBought(); if (id) toastWithUndo(t('boughtCleared'), id); }
+          { const id = await clearBought(voiceGroup.current); if (id) toastWithUndo(t('boughtCleared'), id); }
           break;
         case 'undo':
-          await performUndo();
+          { const label = await performUndo(); if (label) reportVoice(t('undone', { label })); else reportVoice(t('nothingToUndo'), true); }
           break;
       }
     },
-    [addAndRefresh, setBought, removeItem, clearBought, performUndo, toastWithUndo, t, lang],
+    [addAndRefresh, setBought, removeItem, clearBought, performUndo, toastWithUndo, t, lang, voiceGroup, reportVoice],
   );
 
   const { handleSpeech, choice, choose, contextName } = useConversation({
-    list, lang, lists, getItems, editItem, moveItem, executeBasic,
+    list, lang, lists, getItems, executeBasic,
+    editItem: (id, edit, expected) => editItem(id, edit, expected, voiceGroup.current),
+    moveItem: (id, destination, expected) => moveItem(id, destination, expected, voiceGroup.current),
+    onPhraseStart: voice.start, onPhraseFinish: voice.complete, onFeedback: reportVoice,
   });
 
   const onSpeechError = useCallback(
@@ -284,18 +299,21 @@ export const ShoppingList = ({
 
   const handleImport = useCallback(
     async (parsed: ParsedItem[]) => {
+      const group = beginUndoGroup(t('import'));
       let added = 0;
-      for (const item of parsed) {
-        if (!await addAndRefresh(item.name, item.count, item)) break;
-        added++;
-      }
+      try {
+        for (const item of parsed) {
+          if (!await addAndRefresh(item.name, item.count, item, group)) break;
+          added++;
+        }
+      } finally { finishUndoGroup(group); }
       if (added > 0) {
         cue('added');
-        toast.success(t('imported', { count: added }), { id: ITEM_TOAST });
+        toastWithUndo(t('imported', { count: added }), group.id);
       }
       return parsed.slice(added);
     },
-    [addAndRefresh, t],
+    [addAndRefresh, t, beginUndoGroup, finishUndoGroup, toastWithUndo],
   );
 
   // Text shared into the app from another one lands in the import screen.
@@ -477,6 +495,7 @@ export const ShoppingList = ({
         isSupported={isSupported}
         isListening={isListening}
         isStarting={isStarting}
+        isOffline={isOffline}
         toggleListening={toggleListening}
         lang={lang}
         setLang={setLang}
@@ -484,6 +503,18 @@ export const ShoppingList = ({
         flushNow={flushNow}
       />
 
+      {voice.result && <section className={styles.voiceResult} aria-label={t('lastPhrase')} aria-live="polite">
+        <details><summary className={styles.voiceResultTitle}>{t('lastPhrase')}: «{voice.result.text}»</summary>
+        {voice.result.status === 'processing' && <p role="status">{t('voiceApplying')}</p>}
+        {voice.result.messages.length > 0 && <ul>{voice.result.messages.map((message,index) => <li key={index}>{message}</li>)}</ul>}
+        {voice.result.warnings.map((message,index) => <p key={index} className={styles.error}>{message}</p>)}
+        {voice.result.status === 'interrupted' && <p>{t('voiceInterrupted')}</p>}
+        </details>
+        {voice.result.status === 'processing' && <p role="status">{t('voiceApplying')}</p>}
+        {voice.result.warnings.length > 0 && <p className={styles.error} role="status">{t('voiceReviewResult')}</p>}
+        <p className={styles.voiceResultPreview}>{voice.result.messages.join(' · ')}</p>
+        {voice.result.status === 'undone' ? <p>{t('phraseUndone')}</p> : voice.result.undoable && voice.result.status !== 'processing' && <button type="button" onClick={() => void performUndo(voice.result!.groupId)}>{t('undoPhrase')}</button>}
+      </section>}
       {contextName && <p className={styles.voiceContext} role="status">{t('voiceContext', { name: contextName })}</p>}
 
       <form className={styles.form} onSubmit={handleManualAdd}>

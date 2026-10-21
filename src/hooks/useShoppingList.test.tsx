@@ -81,6 +81,44 @@ const mountLoaded = async () => {
 };
 
 describe('useShoppingList undo', () => {
+  it('undoes a phrase after reload without capturing an interleaved manual add', async () => {
+    const first = await mountLoaded();
+    let groupId = '';
+    await act(async () => {
+      const group = first.result.current.beginUndoGroup('молоко, хлеб');
+      groupId = group.id;
+      await first.result.current.addItem('молоко',1,{},group);
+      await first.result.current.addItem('мыло');
+      await first.result.current.addItem('хлеб',1,{},group);
+      first.result.current.finishUndoGroup(group);
+    });
+    first.unmount();
+    const second = await mountLoaded();
+    await act(async () => { expect(await second.result.current.undo(groupId)).toBe('молоко, хлеб'); });
+    expect(second.result.current.items.map(item => item.name)).toEqual(['мыло']);
+  });
+
+  it('keeps only the remaining undo actions after a partial failure', async () => {
+    served = [item('a',{name:'молоко',count:3}),item('b',{name:'хлеб',count:2})];
+    const first = await mountLoaded();
+    let groupId = '';
+    await act(async () => {
+      const group = first.result.current.beginUndoGroup('ещё молоко и хлеб'); groupId=group.id;
+      await first.result.current.changeCount('a',1,group);
+      await first.result.current.changeCount('b',1,group);
+      first.result.current.finishUndoGroup(group);
+    });
+    vi.stubGlobal('fetch',vi.fn((url:string,init?:RequestInit) => url.includes('/a/count') && JSON.parse(String(init?.body)).delta===-1
+      ? {ok:false,status:409,headers:new Headers(),json:async()=>({error:'conflict'})} : respond(url,init)));
+    await act(async () => { await expect(first.result.current.undo(groupId)).rejects.toThrow(); });
+    expect(served.find(item=>item.id==='b')?.count).toBe(2);
+    first.unmount();
+    vi.stubGlobal('fetch',vi.fn(respond));
+    const second=await mountLoaded();
+    await act(async () => { await second.result.current.undo(groupId); });
+    expect(served.map(item=>item.count)).toEqual([3,2]);
+  });
+
   it('undoes an add by removing the item again', async () => {
     const { result } = await mountLoaded();
     await act(async () => {

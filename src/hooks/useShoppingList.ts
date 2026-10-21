@@ -24,6 +24,7 @@ import { readSnapshot, writeSnapshot, removeSnapshot } from '../api/listCache';
 import {
   UndoAction,
   UndoEntry,
+  type UndoGroup,
   UNDO_STACK_LIMIT,
   readUndoStack,
   writeUndoStack,
@@ -37,6 +38,7 @@ import {
 import { ApiError, getToken, notifyAuthExpired, sessionKey, CATALOG_CHANGED_EVENT, SESSION_CHANGED_EVENT } from '../api/client';
 import { sameName } from '../utils/wordForms';
 import { itemFingerprint } from '../utils/conversation';
+import { formatQuantity } from '../utils/quantity';
 import { useT } from '../i18n';
 
 import { convertQuantity, isValidQuantity, quantityLimit, roundQuantity, type Unit } from '../../shared/quantity.js';
@@ -54,7 +56,7 @@ const sameList = (a: Item[], b: Item[]) =>
   );
 
 export const useShoppingList = (list: string, viewer: string) => {
-  const { t } = useT();
+  const { t, lang } = useT();
   // Start from the last known contents so a shop with no signal shows the list
   // instead of an empty screen; the network refresh replaces it when it lands.
   const [items, setItems] = useState<Item[]>(() => readSnapshot(list)?.items ?? []);
@@ -95,18 +97,40 @@ export const useShoppingList = (list: string, viewer: string) => {
   // ---- undo stack (persisted, so it survives a reload in the shop) ----
 
   const undoStackRef = useRef<UndoEntry[]>(readUndoStack(list));
+  const activeGroups = useRef(new Set<string>());
+  const beginUndoGroup = useCallback((label: string): UndoGroup => {
+    const group = { id: generateItemId(), label };
+    activeGroups.current.add(group.id);
+    return group;
+  }, []);
+  const finishUndoGroup = useCallback((group: UndoGroup) => {
+    activeGroups.current.delete(group.id);
+    return readUndoStack(list).find(entry => entry.id === group.id);
+  }, [list]);
 
   const pushUndo = useCallback(
-    (label: string, action: UndoAction) => {
+    (label: string, action: UndoAction, group?: UndoGroup) => {
       if (!mounted.current || sessionKey() !== session.current) return undefined;
       const id = generateItemId();
       const stored = readUndoStack(list);
-      undoStackRef.current = [...stored, { id, label, action }];
-      if (undoStackRef.current.length > UNDO_STACK_LIMIT) undoStackRef.current.shift();
+      const current = 'id' in action ? itemsRef.current.find(item => item.id === action.id) : undefined;
+      const quantity = current ? formatQuantity(current, lang) : '';
+      const summary = action.kind === 'removeItem' ? t('voiceAppliedAdd', { name: label, quantity })
+        : action.kind === 'restoreItems' ? t('removed', { items: action.items.map(item => item.name).join(', ') })
+        : action.kind === 'setBought' ? t(action.bought ? 'voiceAppliedReturn' : 'checkedOff', { name: label, items: label })
+        : action.kind === 'moveItem' ? t('voiceAppliedMove', { name: label })
+        : t('voiceAppliedEdit', { name: current?.name ?? label, quantity: [quantity, current?.note].filter(Boolean).join(' · ') });
+      const entry = { id, label, action, summary };
+      if (group) {
+        const existing = stored.find(entry => entry.id === group.id);
+        if (existing?.action.kind === 'group') existing.action.entries.push(entry);
+        else stored.push({ id: group.id, label: group.label, action: { kind: 'group', entries: [entry] } });
+      } else stored.push(entry);
+      undoStackRef.current = stored.slice(-UNDO_STACK_LIMIT);
       writeUndoStack(list, undoStackRef.current);
-      return id;
+      return group?.id ?? id;
     },
-    [list],
+    [list, t, lang],
   );
 
   const tRef = useRef(t);
@@ -420,7 +444,7 @@ export const useShoppingList = (list: string, viewer: string) => {
   // ---- public operations: record an undo entry, then apply ----
 
   const changeCount = useCallback(
-    async (id: string, delta: number) => {
+    async (id: string, delta: number, group?: UndoGroup) => {
       const item = itemsRef.current.find((i) => i.id === id);
       if (!item || !isValidQuantity(Math.abs(delta), item.unit)) return;
       const next = Math.min(quantityLimit(item.unit), Math.max(0, roundQuantity(item.count + delta)));
@@ -428,9 +452,9 @@ export const useShoppingList = (list: string, viewer: string) => {
       if (!appliedDelta) return;
       if (!await applyCount(id, appliedDelta)) return false;
       if (next <= 0) {
-        pushUndo(item.name, { kind: 'restoreItems', items: [{ ...item }] });
+        pushUndo(item.name, { kind: 'restoreItems', items: [{ ...item }] }, group);
       } else {
-        pushUndo(item.name, { kind: 'changeCount', id, delta: -appliedDelta, unit: item.unit ?? null });
+        pushUndo(item.name, { kind: 'changeCount', id, delta: -appliedDelta, unit: item.unit ?? null }, group);
       }
       return true;
     },
@@ -438,7 +462,7 @@ export const useShoppingList = (list: string, viewer: string) => {
   );
 
   const addItem = useCallback(
-    async (name: string, count = 1, details: Pick<Item, 'unit' | 'note'> = {}) => {
+    async (name: string, count = 1, details: Pick<Item, 'unit' | 'note'> = {}, group?: UndoGroup) => {
       const trimmed = name.trim();
       if (!trimmed) return;
       const unit = details.unit ?? null;
@@ -461,10 +485,10 @@ export const useShoppingList = (list: string, viewer: string) => {
           // Re-adding something already checked off puts it back on the list.
           const edit = { count: convertQuantity(count, unit, existing.unit)!, bought: false };
           if (!await applyEdit(existing.id, edit, itemExpectation(existing))) return undefined;
-          pushUndo(existing.name, { kind: 'editItem', id: existing.id, edit: { count: existing.count, bought: true }, expected: itemExpectation({ ...existing, ...edit }) });
+          pushUndo(existing.name, { kind: 'editItem', id: existing.id, edit: { count: existing.count, bought: true }, expected: itemExpectation({ ...existing, ...edit }) }, group);
           return itemsRef.current.find(item => item.id === existing.id);
         }
-        return await changeCount(existing.id, convertQuantity(count, unit, existing.unit)!)
+        return await changeCount(existing.id, convertQuantity(count, unit, existing.unit)!, group)
           ? itemsRef.current.find((item) => item.id === existing.id) : undefined;
       }
 
@@ -479,24 +503,24 @@ export const useShoppingList = (list: string, viewer: string) => {
         bought_at: null,
       };
       if (!await applyAdd(newItem)) return undefined;
-      pushUndo(trimmed, { kind: 'removeItem', id: newItem.id, expected: itemExpectation(newItem) });
+      pushUndo(trimmed, { kind: 'removeItem', id: newItem.id, expected: itemExpectation(newItem) }, group);
       return itemsRef.current.find(item => item.id === newItem.id);
     },
     [list, changeCount, applyAdd, applyEdit, pushUndo],
   );
 
   const removeItem = useCallback(
-    async (id: string) => {
+    async (id: string, group?: UndoGroup) => {
       const item = itemsRef.current.find((i) => i.id === id);
       if (!item) return;
       if (!await applyRemove(id)) return undefined;
-      return pushUndo(item.name, { kind: 'restoreItems', items: [{ ...item }] });
+      return pushUndo(item.name, { kind: 'restoreItems', items: [{ ...item }] }, group);
     },
     [applyRemove, pushUndo],
   );
 
   const editItem = useCallback(
-    async (id: string, edit: ItemEdit, expected?: Item) => {
+    async (id: string, edit: ItemEdit, expected?: Item, group?: UndoGroup) => {
       const item = itemsRef.current.find((i) => i.id === id);
       if (!item || (expected && itemFingerprint(item) !== itemFingerprint(expected))) return false;
 
@@ -524,7 +548,7 @@ export const useShoppingList = (list: string, viewer: string) => {
       if (next.count !== undefined || next.unit !== undefined) { previous.count = item.count; previous.unit = item.unit ?? null; }
 
       if (!await applyEdit(id, next, itemExpectation(expected ?? item))) return false;
-      pushUndo(item.name, { kind: 'editItem', id, edit: previous, expected: itemExpectation({ ...item, ...next }) });
+      pushUndo(item.name, { kind: 'editItem', id, edit: previous, expected: itemExpectation({ ...item, ...next }) }, group);
       return true;
     },
     [applyEdit, pushUndo],
@@ -543,12 +567,12 @@ export const useShoppingList = (list: string, viewer: string) => {
     return moved;
   }, [list, applyItems]);
 
-  const moveItem = useCallback(async (id: string, destination: string, expected: Item) => {
+  const moveItem = useCallback(async (id: string, destination: string, expected: Item, group?: UndoGroup) => {
     const item = itemsRef.current.find((entry) => entry.id === id);
     if (!item || destination === list || itemFingerprint(item) !== itemFingerprint(expected)) return false;
     try {
       const moved = await applyMove(item, list, destination, itemExpectation(item));
-      pushUndo(item.name, { kind: 'moveItem', item: moved, from: destination, to: list });
+      pushUndo(item.name, { kind: 'moveItem', item: moved, from: destination, to: list }, group);
       return true;
     } catch {
       await loadItems();
@@ -557,11 +581,11 @@ export const useShoppingList = (list: string, viewer: string) => {
   }, [list, applyMove, pushUndo, loadItems]);
 
   const setBought = useCallback(
-    async (id: string, bought: boolean) => {
+    async (id: string, bought: boolean, group?: UndoGroup) => {
       const item = itemsRef.current.find((i) => i.id === id);
       if (!item || item.bought === bought) return;
       if (!await applyBought(id, bought)) return false;
-      pushUndo(item.name, { kind: 'setBought', id, bought: !bought, expected: itemExpectation({ ...item, bought }) });
+      pushUndo(item.name, { kind: 'setBought', id, bought: !bought, expected: itemExpectation({ ...item, bought }) }, group);
       return true;
     },
     [applyBought, pushUndo],
@@ -587,7 +611,7 @@ export const useShoppingList = (list: string, viewer: string) => {
     [applyOrder, pushUndo],
   );
 
-  const clearBought = useCallback(async () => {
+  const clearBought = useCallback(async (group?: UndoGroup) => {
     const boughtItems = itemsRef.current.filter((item) => item.bought).map((item) => ({ ...item }));
     if (boughtItems.length === 0) return;
 
@@ -595,7 +619,7 @@ export const useShoppingList = (list: string, viewer: string) => {
     try {
       await clearBoughtItems(list, boughtItems.map(item => item.id));
       if (deletedVisibleRef.current) void loadDeleted();
-      return pushUndo(`${tRef.current('bought')} (${boughtItems.length})`, { kind: 'restoreItems', items: boughtItems });
+      return pushUndo(`${tRef.current('bought')} (${boughtItems.length})`, { kind: 'restoreItems', items: boughtItems }, group);
     } catch {
       loadItems();
     }
@@ -640,14 +664,30 @@ export const useShoppingList = (list: string, viewer: string) => {
   // ---- undo ----
 
   const runUndoAction = useCallback(
-    async (action: UndoAction) => {
+    async function run(action: UndoAction, progress: (remaining: UndoAction) => void = () => {}): Promise<boolean> {
       switch (action.kind) {
+        case 'group': {
+          const remaining = [...action.entries];
+          while (remaining.length) {
+            const entry = remaining[remaining.length - 1];
+            if (!await run(entry.action, action => {
+              remaining[remaining.length - 1] = { ...entry, action };
+              progress({ kind: 'group', entries: [...remaining] });
+            })) return false;
+            remaining.pop();
+            progress({ kind: 'group', entries: [...remaining] });
+          }
+          return true;
+        }
         case 'removeItem':
           return applyRemove(action.id, action.expected);
         case 'restoreItems':
           // Sequential on purpose: restoring a whole cleared cart must land in
           // the order it was in, and each POST assigns the next position.
-          for (const item of action.items) if (!await applyAdd(item)) return false;
+          for (let index = 0; index < action.items.length; index++) {
+            if (!await applyAdd(action.items[index])) return false;
+            progress({ kind: 'restoreItems', items: action.items.slice(index + 1) });
+          }
           return true;
         case 'changeCount':
           return applyCount(action.id, action.delta, action.unit ?? null);
@@ -689,17 +729,19 @@ export const useShoppingList = (list: string, viewer: string) => {
     while (undoStackRef.current.length > 0) {
       const index = actionId ? undoStackRef.current.findIndex(entry => entry.id === actionId) : undoStackRef.current.length - 1;
       if (index < 0) return null;
-      const [entry] = undoStackRef.current.splice(index, 1);
-      writeUndoStack(list, undoStackRef.current);
-      if (!isApplicable(entry.action)) { if (actionId) return null; continue; }
-      try {
-        const result = await runUndoAction(entry.action);
-        if (result === false) throw new Error('Undo failed');
-      } catch (error) {
-        undoStackRef.current.splice(index, 0, entry);
+      const entry = undoStackRef.current[index];
+      if (activeGroups.current.has(entry.id)) throw new Error('Phrase is still being applied');
+      const removeEntry = () => {
+        undoStackRef.current = readUndoStack(list).filter(candidate => candidate.id !== entry.id);
         writeUndoStack(list, undoStackRef.current);
-        throw error;
-      }
+      };
+      if (!isApplicable(entry.action)) { removeEntry(); if (actionId) return null; continue; }
+      const result = await runUndoAction(entry.action, action => {
+        undoStackRef.current = readUndoStack(list).map(candidate => candidate.id === entry.id ? { ...candidate, action } : candidate);
+        writeUndoStack(list, undoStackRef.current);
+      });
+      if (result === false) throw new Error('Undo failed');
+      removeEntry();
       return entry.label;
     }
     return null;
@@ -717,6 +759,7 @@ export const useShoppingList = (list: string, viewer: string) => {
     retrySync: () => runSync().then(() => loadItems()),
     retryDeleted: loadDeleted,
     lastUndoId: () => undoStackRef.current.at(-1)?.id,
+    beginUndoGroup, finishUndoGroup,
     addItem,
     removeItem,
     editItem,

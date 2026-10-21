@@ -14,6 +14,19 @@ export const LANGUAGES: { lang: Lang; speech: string; label: string }[] = [
 ];
 
 const ru = {
+  voiceReviewResult: 'Не всё применено. Раскройте результат, чтобы посмотреть причину.',
+  lastPhrase: "Последняя фраза",
+  voiceApplying: "Применяем фразу…",
+  voiceCancelled: "Выбор отменён. Не выбранные действия не применены.",
+  voiceInterrupted: "Обработка прервалась. Ниже — сохранённые действия этой фразы; их можно отменить.",
+  voiceOfflineHint: "Список работает без сети. Распознавание речи может требовать интернет.",
+  undoPhrase: "Отменить фразу",
+  phraseUndone: "Действия этой фразы отменены.",
+  voiceAppliedAdd: "Добавлено: {name} · {quantity}",
+  voiceAppliedReturn: "Возвращено в покупки: {name}",
+  voiceAppliedMove: "Перенесено в другой список: {name}",
+  voiceAppliedEdit: "Изменено: {name} · {quantity}",
+
   menu: "Меню",
   listMenu: "Действия со списком",
   chooseList: "Выбрать список: {name}",
@@ -268,6 +281,19 @@ const ru = {
 };
 
 const en: Record<keyof typeof ru, string> = {
+  voiceReviewResult: 'Some actions were not applied. Expand the result to see why.',
+  lastPhrase: "Last phrase",
+  voiceApplying: "Applying the phrase…",
+  voiceCancelled: "Selection cancelled. Unselected actions were not applied.",
+  voiceInterrupted: "Processing was interrupted. The saved actions below can be undone.",
+  voiceOfflineHint: "The list works offline. Speech recognition may need an internet connection.",
+  undoPhrase: "Undo phrase",
+  phraseUndone: "This phrase has been undone.",
+  voiceAppliedAdd: "Added: {name} · {quantity}",
+  voiceAppliedReturn: "Returned to shopping: {name}",
+  voiceAppliedMove: "Moved to another list: {name}",
+  voiceAppliedEdit: "Changed: {name} · {quantity}",
+
   menu: "Menu",
   listMenu: "List actions",
   chooseList: "Choose list: {name}",

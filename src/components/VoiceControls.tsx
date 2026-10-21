@@ -5,6 +5,7 @@ type Props = {
   isSupported: boolean;
   isListening: boolean;
   isStarting?: boolean;
+  isOffline?: boolean;
   toggleListening: () => void;
   lang: Lang;
   setLang: (lang: Lang) => void;
@@ -17,6 +18,7 @@ export const VoiceControls = ({
   isSupported,
   isListening,
   isStarting,
+  isOffline,
   toggleListening,
   lang,
   setLang,
@@ -67,6 +69,7 @@ export const VoiceControls = ({
         ))}
       </select>
 
+      {isOffline && <p className={styles.voiceOffline}>{t('voiceOfflineHint')}</p>}
       <div className={styles.interimText} aria-live="polite">
         {interimText}
       </div>

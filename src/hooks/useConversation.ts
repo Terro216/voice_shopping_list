@@ -10,6 +10,9 @@ import { isValidQuantity } from '../../shared/quantity.js';
 import { cue } from '../utils/feedback';
 
 type Options = {
+  onPhraseStart?: (text: string) => void;
+  onPhraseFinish?: () => void;
+  onFeedback?: (message: string, error?: boolean) => void;
   list: string;
   lang: Lang;
   lists: ListSummary[];
@@ -81,6 +84,7 @@ export const useConversation = (options: Options) => {
         clearContext();
         cue('unrecognized');
         toast.error(message, { id: 'speech' });
+        ops.onFeedback?.(message, true);
       };
       if (command.type === 'unrecognized') {
         fail(ops.t('voiceCorrectionHelp'));
@@ -95,9 +99,10 @@ export const useConversation = (options: Options) => {
             let selected = matches[0];
             if (matches.length > 1) {
               const id = await ask({ title: ops.t('voiceChooseItem'), options: matches.map(item => ({
-                id: item.id, label: `${item.name} · ${formatQuantity(item, ops.lang)}${item.note ? ` · ${item.note}` : ''}`,
+                id: item.id, label: `${item.name} · ${formatQuantity(item, ops.lang)}${item.note ? ` · ${item.note}` : ''}${item.bought ? ` · ${ops.t('bought')}` : ''}`,
               })) });
-              if (!valid() || !id) return;
+              if (!valid()) return;
+              if (!id) { ops.onFeedback?.(ops.t('voiceCancelled'), true); return; }
               selected = matches.find(item => item.id === id)!;
             }
             targets.push(selected);
@@ -145,7 +150,7 @@ export const useConversation = (options: Options) => {
           })),
         });
         if (!valid()) return;
-        if (!id) { clearContext(); return; }
+        if (!id) { clearContext(); ops.onFeedback?.(ops.t('voiceCancelled'), true); return; }
         selected = candidates.find((item) => item.id === id)!;
       }
       if (!selected) return;
@@ -157,7 +162,7 @@ export const useConversation = (options: Options) => {
         if (destinations.length > 1) {
           const id = await ask({ title: ops.t('voiceChooseList'), options: destinations.map((entry) => ({ id: entry.id, label: `${entry.name} · ${entry.owner}` })) });
           if (!valid()) return;
-          if (!id) { clearContext(); return; }
+          if (!id) { clearContext(); ops.onFeedback?.(ops.t('voiceCancelled'), true); return; }
           destination = destinations.find((entry) => entry.id === id)!;
         }
         if (!destination || destination.id === ops.list) { fail(ops.t('voiceSameList')); return; }
@@ -195,10 +200,19 @@ export const useConversation = (options: Options) => {
     // The microphone pauses while a choice is visible; ignore late finals too.
     if (resolver.current) return;
     const epoch = generation.current;
-    queue.current = queue.current.then(() => processRef.current(text, epoch)).catch(() => {
+    queue.current = queue.current.then(async () => {
       if (epoch !== generation.current) return;
-      clearContext();
-      toast.error(latest.current.t('voiceChangeFailed'), { id: 'speech' });
+      latest.current.onPhraseStart?.(text);
+      try { await processRef.current(text, epoch); }
+      catch {
+        if (epoch !== generation.current) return;
+        clearContext();
+        const message = latest.current.t('voiceChangeFailed');
+        latest.current.onFeedback?.(message, true);
+        toast.error(message, { id: 'speech' });
+      } finally {
+        if (epoch === generation.current) latest.current.onPhraseFinish?.();
+      }
     });
     return queue.current;
   }, [clearContext]);
